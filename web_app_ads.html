@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>مركز الإعلانات — Ads Mini App</title>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Adsgram SDK -->
+  <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text);
+      padding: 16px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      color: #60a5fa;
+      margin-bottom: 6px;
+    }
+
+    .header p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .stats-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-around;
+      text-align: center;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    .stat-item h3 {
+      font-size: 18px;
+      color: var(--success);
+    }
+
+    .stat-item span {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .provider-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .provider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .provider-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .badge {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      padding: 4px 8px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.2s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+      background: var(--primary-hover);
+    }
+
+    .btn:disabled {
+      background: #475569;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    /* Modal Timer Overlay */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .modal-content {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 24px;
+      text-align: center;
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .timer-circle {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 4px solid var(--primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 28px;
+      font-weight: bold;
+      margin: 16px auto;
+      color: #60a5fa;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <h1>🎁 مركز الإعلانات والمكافآت</h1>
+      <p>شاهد الإعلانات القيرة واجمع رصيد لشراء الخدمات مجاناً</p>
+    </div>
+
+    <!-- بطاقة الإحصائيات -->
+    <div class="stats-card">
+      <div class="stat-item">
+        <h3 id="stat-reward-p1">+$0.005</h3>
+        <span>فيديو Adsgram</span>
+      </div>
+      <div class="stat-item">
+        <h3 id="stat-reward-p2">+$0.003</h3>
+        <span>روابط Monetag</span>
+      </div>
+      <div class="stat-item">
+        <h3 id="stat-reward-p3">+$0.008</h3>
+        <span>مهام TaskAds</span>
+      </div>
+    </div>
+
+    <!-- شركة 1: Adsgram Video -->
+    <div class="provider-card">
+      <div class="provider-header">
+        <div class="provider-title">
+          <span>🎬</span>
+          <span>فيديو Adsgram القصير</span>
+        </div>
+        <span class="badge">+$0.005</span>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted);">شاهد فيديو إعلاني مدته 15 ثانية واحصل على المكافأة فوراً.</p>
+      <button class="btn" id="btn-adsgram" onclick="watchAdsgramVideo()">
+        ▶️ مشاهدة الفيديو المباشر
+      </button>
+    </div>
+
+    <!-- شركة 2: Monetag Direct Link -->
+    <div class="provider-card">
+      <div class="provider-header">
+        <div class="provider-title">
+          <span>🔗</span>
+          <span>إعلانات الرابط المباشر (Monetag)</span>
+        </div>
+        <span class="badge">+$0.003</span>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted);">افتح الرابط الإعلاني لمدة 15 ثانية ثم استلم رصيدك.</p>
+      <button class="btn" id="btn-monetag" onclick="startMonetagAd()">
+        🌐 زيارة الرابط المباشر
+      </button>
+    </div>
+
+    <!-- شركة 3: Task & Banners -->
+    <div class="provider-card">
+      <div class="provider-header">
+        <div class="provider-title">
+          <span>📌</span>
+          <span>مهام وبانرات إعلانية</span>
+        </div>
+        <span class="badge">+$0.008</span>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted);">إنجاز مهمة إعلانية أو الاشتراك في القناة الراعية.</p>
+      <button class="btn" id="btn-taskads" onclick="startTaskAd()">
+        ✨ إنجاز المهمة الإعلانية
+      </button>
+    </div>
+  </div>
+
+  <!-- نافذة المعاينة المدمجة داخل تيليجرام (بدون الخروج لكروم إطلاقاً) -->
+  <div class="modal-overlay" id="embedded-ad-modal" style="display:none; flex-direction:column; padding:10px;">
+    <div style="width:100%; max-width:480px; background:#1e293b; border-radius:16px; padding:12px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-size:14px; font-weight:bold; color:#60a5fa;">📺 تصفح الإعلان واستلم رصيدك</span>
+      <div>
+        <button onclick="claimInAppReward()" style="background:#10b981; color:white; border:none; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:bold; cursor:pointer; margin-left:6px;">🎉 استلام المكافأة</button>
+        <button onclick="closeEmbeddedAd()" style="background:#ef4444; color:white; border:none; padding:6px 10px; border-radius:8px; font-size:12px; cursor:pointer;">❌ إغلاق</button>
+      </div>
+    </div>
+    <div style="width:100%; max-width:480px; height:65vh; background:white; border-radius:16px; overflow:hidden; position:relative;">
+      <iframe id="embedded-ad-frame" src="about:blank" style="width:100%; height:100%; border:none;"></iframe>
+    </div>
+  </div>
+
+  <script>
+    // تهيئة Telegram WebApp
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    let activeProvider = "adsgram";
+
+    // الحصول على block_id والروابط من المعلمات أو الإعدادات
+    const urlParams = new URLSearchParams(window.location.search);
+    const adsgramBlockId = urlParams.get('block_id') || urlParams.get('adsgram_id') || "43613";
+    let monetagUrl = urlParams.get('monetag_url') || "";
+    if (!monetagUrl || monetagUrl.includes("example.com")) {
+      monetagUrl = "https://omg10.com/4/11611665";
+    }
+
+    let taskUrl = urlParams.get('task_url') || "";
+    if (!taskUrl || taskUrl.includes("example.com")) {
+      taskUrl = "https://www.effectivecpmnetwork.com/ihg1hei3h?key=936c68e9535dce9709a3b05a57b5fb15";
+    }
+
+    // 1. تشغيل فيديو Adsgram مباشرة بدون أي مؤقتات خارجية (فيديو Adsgram يحتوي على عداد رسمي خاص به)
+    function watchAdsgramVideo() {
+      activeProvider = "adsgram";
+      const blockIdToUse = (adsgramBlockId && adsgramBlockId !== "1234") ? adsgramBlockId : "43613";
+      if (window.Adsgram) {
+        try {
+          const AdController = window.Adsgram.init({ blockId: blockIdToUse });
+          AdController.show().then((result) => {
+            // تضاف المكافأة فورياً وحصرياً بعد انتهاء عداد فيديو Adsgram الرسمي بـ 100%
+            sendRewardToBot("adsgram");
+          }).catch((result) => {
+            alert("⚠️ لم يتم مشاهدة الفيديو كاملاً. يجب مشاهدة فيديو الإعلان حتى النهاية للحصول على المكافأة.");
+          });
+        } catch (e) {
+          alert("⚠️ تعذر تشغيل مشغل الإعلانات حالياً، يرجى إعادة المحاولة.");
+        }
+      } else {
+        alert("⚠️ جاري تحميل مشغل الإعلانات، يرجى المحاولة خلال ثوانٍ.");
+      }
+    }
+
+    // 2. تشغيل إعلان Monetag المباشر
+    function startMonetagAd() {
+      activeProvider = "monetag";
+      if (tg && tg.openLink) { tg.openLink(monetagUrl); }
+      else { window.open(monetagUrl, "_blank"); }
+      
+      const btn = document.getElementById("btn-monetag");
+      if (btn) {
+        btn.innerText = "🎉 تأكيد الزيارة واستلام المكافأة";
+        btn.style.background = "#10b981";
+        btn.onclick = function() {
+          sendRewardToBot("monetag");
+          btn.innerText = "🌐 زيارة الرابط المباشر (Monetag)";
+          btn.style.background = "var(--primary)";
+          btn.onclick = startMonetagAd;
+        };
+      }
+    }
+
+    // 3. تشغيل مهمة TaskAds المباشرة
+    function startTaskAd() {
+      activeProvider = "taskads";
+      if (tg && tg.openLink) { tg.openLink(taskUrl); }
+      else { window.open(taskUrl, "_blank"); }
+      
+      const btn = document.getElementById("btn-taskads");
+      if (btn) {
+        btn.innerText = "🎉 تأكيد الإنجاز واستلام المكافأة";
+        btn.style.background = "#10b981";
+        btn.onclick = function() {
+          sendRewardToBot("taskads");
+          btn.innerText = "✨ إنجاز المهمة الإعلانية";
+          btn.style.background = "var(--primary)";
+          btn.onclick = startTaskAd;
+        };
+      }
+    }
+
+    // تشغيل نافذة المؤقت
+    function startModalTimer(provider, seconds) {
+      activeProvider = provider;
+      const modal = document.getElementById("timer-modal");
+      const countEl = document.getElementById("timer-count");
+      const claimBtn = document.getElementById("btn-claim");
+      
+      modal.style.display = "flex";
+      claimBtn.disabled = true;
+      let left = seconds;
+      countEl.innerText = left;
+
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      countdownInterval = setInterval(() => {
+        left--;
+        countEl.innerText = left;
+        if (left <= 0) {
+          clearInterval(countdownInterval);
+          countEl.innerText = "✅";
+          claimBtn.disabled = false;
+        }
+      }, 1000);
+    }
+
+    // إرسال المكافأة للبوت
+    function claimAdReward() {
+      document.getElementById("timer-modal").style.display = "none";
+      sendRewardToBot(activeProvider);
+    }
+
+    function sendRewardToBot(provider) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const userId = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user.id : (urlParams.get('uid') || 0);
+      const token = "TOKEN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
+      
+      // إرسال كول باك HTTP مباشر لسيرفر البوت لضمان إضافة الرصيد
+      fetch("/api/claim_ad_reward", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          provider: provider,
+          token: token
+        })
+      }).then(res => res.json()).then(data => {
+        if (data.success) {
+          alert("🎉 مبروك! تم إضافة المكافأة (+" + data.reward_usd + "$) بنجاح! رصيدك الجديد: " + data.new_balance + "$");
+          if (tg && tg.close) { tg.close(); }
+        } else if (data.err_code === "DAILY_LIMIT_REACHED") {
+          alert("⚠️ لقد وصلت للحد الأقصى المسموح به لهذا الإعلان اليوم!");
+        } else {
+          alert("🎉 تم تسجيل مكافأتك بنجاح!");
+        }
+      }).catch(err => {
+        if (tg && tg.sendData) {
+          tg.sendData(JSON.stringify({ action: "ad_reward", provider: provider, token: token }));
+        } else {
+          alert("🎉 تم تسجيل مكافأتك بنجاح!");
+        }
+      });
+    }
+  </script>
+</body>
+</html>
