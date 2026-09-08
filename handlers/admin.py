@@ -3339,10 +3339,31 @@ async def admin_binance_uid_received(message: Message, state: FSMContext):
 
 # ─── Binance Manual — مراجعة طلبات الدفع ─────────────────────────────────────────────
 
+async def _update_binance_review_msg(callback: CallbackQuery, text: str):
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(text=text, parse_mode="HTML")
+    except Exception as _e:
+        logger.warning("Could not edit review message: %s", _e)
+
+
+async def _can_review_binance(user_id: int) -> bool:
+    if is_admin(user_id):
+        return True
+    try:
+        from database import get_sub_admin_perms
+        perms = await get_sub_admin_perms(user_id)
+        return bool(perms and perms.get("deposits"))
+    except Exception:
+        return False
+
+
 @router.callback_query(F.data.startswith("admin_binance:approve:"))
 async def admin_binance_approve(callback: CallbackQuery, bot: Bot):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔", show_alert=True)
+    if not await _can_review_binance(callback.from_user.id):
+        await callback.answer("⛔ ليس لديك صلاحية", show_alert=True)
         return
     parts = callback.data.split(":")
     payment_id = int(parts[2])
@@ -3351,34 +3372,36 @@ async def admin_binance_approve(callback: CallbackQuery, bot: Bot):
     if amount is None:
         await callback.answer("⚠️ تمت معالجة هذا الطلب مسبقاً.", show_alert=True)
         return
-    await callback.message.edit_text(
+
+    admin_name = callback.from_user.full_name
+    await _update_binance_review_msg(
+        callback,
         f"✅ <b>تمت الموافقة وتحديث الرصيد</b>\n\n"
         f"📋 رقم الطلب: #{payment_id}\n"
         f"👤 المستخدم: <code>{user_id}</code>\n"
-        f"💵 المبلغ المُضاف: <b>${amount:.2f}</b>\n"
-        f"💰 الرصيد الجديد للعميل: <b>${new_balance:.2f}</b>",
-        parse_mode="HTML",
+        f"💵 المبلغ المُضاف: <b>${amount:.2f} USDT</b>\n"
+        f"💰 الرصيد الجديد للعميل: <b>${new_balance:.2f}</b>\n"
+        f"👨‍💻 تمت الموافقة بواسطة: <b>{admin_name}</b>",
     )
     await callback.answer("✅ تمت الموافقة وتحديث الرصيد بنجاح!", show_alert=True)
+
     user = await get_user(user_id)
     lang = user.get("language", "ar") if user else "ar"
     try:
+        from translations import t
         await bot.send_message(
             user_id,
-            f"✅ <b>تم التأكد من عملية الشحن بنجاح!</b>\n\n"
-            f"💵 المبلغ المُضاف: <b>${amount:.2f}</b>\n"
-            f"💰 رصيدك الحالي: <b>${new_balance:.2f}</b>\n\n"
-            "شكراً لاستخدامك البوت! 🎉",
+            t(lang, "topup_binance_approved", amount=amount, new_balance=new_balance),
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("Failed to notify user of approved deposit: %s", _e)
 
 
 @router.callback_query(F.data.startswith("admin_binance:reject:"))
 async def admin_binance_reject(callback: CallbackQuery, bot: Bot):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔", show_alert=True)
+    if not await _can_review_binance(callback.from_user.id):
+        await callback.answer("⛔ ليس لديك صلاحية", show_alert=True)
         return
     parts = callback.data.split(":")
     payment_id = int(parts[2])
@@ -3387,47 +3410,51 @@ async def admin_binance_reject(callback: CallbackQuery, bot: Bot):
     if not ok:
         await callback.answer("⚠️ تمت معالجة هذا الطلب مسبقاً.", show_alert=True)
         return
-    await callback.message.edit_text(
-        f"❌ <b>تم الرفض</b>\n\n"
+
+    admin_name = callback.from_user.full_name
+    await _update_binance_review_msg(
+        callback,
+        f"❌ <b>تم رفض طلب الشحن</b>\n\n"
         f"📋 رقم الطلب: #{payment_id}\n"
-        f"👤 المستخدم: {user_id}",
-        parse_mode="HTML",
+        f"👤 المستخدم: <code>{user_id}</code>\n"
+        f"👨‍💻 رُفض بواسطة: <b>{admin_name}</b>",
     )
     await callback.answer("❌ تم الرفض", show_alert=True)
+
+    user = await get_user(user_id)
+    lang = user.get("language", "ar") if user else "ar"
     try:
+        from translations import t
         await bot.send_message(
             user_id,
-            "❌ <b>تم رفض طلب الشحن</b>\n\n"
-            "لم يتم التحقق من عملية الدفع.\n"
-            "تواصل مع الدعم إذا كنت متأكداً من صحة العملية.",
+            t(lang, "topup_binance_rejected"),
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("Failed to notify user of rejected deposit: %s", _e)
 
 
 @router.callback_query(F.data.startswith("admin_binance:ban:"))
 async def admin_binance_ban(callback: CallbackQuery, bot: Bot):
     if not is_admin(callback.from_user.id):
-        await callback.answer("⛔", show_alert=True)
+        await callback.answer("⛔ فقط الأدمن الأساسي يمكنه الحظر", show_alert=True)
         return
     parts = callback.data.split(":")
     payment_id = int(parts[2])
     user_id    = int(parts[3])
     await reject_manual_payment(payment_id)
-    await set_user_banned(user_id, True, reason="حاول الغش في طلب شحن Binance يدوي")
-    await callback.message.edit_text(
-        f"🚫 <b>تم حظر المستخدم</b>\n\n"
-        f"📋 رقم الطلب المرفوض: #{payment_id}\n"
+    await set_user_banned(user_id, True, reason="طلب شحن احتيالي / وهمي عبر Binance")
+    await _update_binance_review_msg(
+        callback,
+        f"🚫 <b>تم حظر المستخدم ورفض الطلب</b>\n\n"
+        f"📋 رقم الطلب: #{payment_id}\n"
         f"👤 المستخدم المحظور: <code>{user_id}</code>",
-        parse_mode="HTML",
     )
     await callback.answer("🚫 تم الحظر!", show_alert=True)
     try:
         await bot.send_message(
             user_id,
-            "🚫 <b>تم حظر حسابك</b>\n\n"
-            "تواصل مع الدعم لمعرفة السبب.",
+            "🚫 <b>تم حظر حسابك من استخدام البوت.</b>",
             parse_mode="HTML",
         )
     except Exception:

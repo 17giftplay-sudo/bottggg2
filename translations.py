@@ -289,16 +289,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         # ── أزرار البحث ───────────────────────────────────────────
         "btn_search":          "🔎  بحث",
 
-        # ── Binance Pay (تحقق تلقائي) ─────────────────────────────
-        "btn_binance_manual": "🟡  Binance Pay — USDT يدوي",
-        "btn_binance_pay":    "🟡  Binance Pay — USDT (تلقائي ⚡)",
+        # ── Binance Pay (مراجعة يدوية) ────────────────────────────
+        "btn_binance_manual": "🟡  Binance Pay — USDT (يدوي 👨‍💻)",
+        "btn_binance_pay":    "🟡  Binance Pay — USDT (يدوي 👨‍💻)",
 
         "topup_binance_ask_amount": (
             f"{_E['money']} <b>إيداع عبر Binance Pay — USDT</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  الحد الأدنى: <b>${{min_usd:.2f}}</b>\n"
             "💱  العملة المقبولة: <b>USDT فقط</b>\n"
-            "⚡  التحقق: <b>تلقائي فوري</b>\n"
+            "🛡️  التحقق: <b>مراجعة يدوية من الإدارة 👨‍💻</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "أدخل المبلغ الذي تريد إيداعه بالدولار $:"
         ),
@@ -312,32 +312,32 @@ _STRINGS: dict[str, dict[str, str]] = {
             "🔑 <b>معرّف المحفظة (Pay ID):</b>\n"
             "<code>{uid}</code>\n\n"
             f"{_E['warning']} <b>أرسل بالضبط ${{amount:.2f}} USDT عبر Binance Pay ID.</b>\n\n"
-            f"بعد الإرسال اضغط {_E['thumbup']} <b>دفعت المبلغ</b>"
+            f"بعد الإرسال اضغط {_E['thumbup']} <b>دفعت المبلغ</b> لإرسال الإثبات أو معرّف العملية."
         ),
         "topup_binance_enter_amount": (
             f"{_E['money']} <b>أدخل المبلغ الذي أرسلته بالدولار $</b>\n\n"
             "<i>مثال: 5 أو 10.50</i>"
         ),
         "topup_binance_enter_hash": (
-            f"🔑 <b>أدخل معرّف الطلب (Order ID)</b>\n\n"
+            f"🔑 <b>إثبات عملية التحويل</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "📲 <b>كيف تجده؟</b>\n"
-            "Binance ← Pay ← سجل المعاملات\n"
-            "← اضغط على العملية ← انسخ <b>معرّف الطلب</b>\n\n"
-            "مثال: <code>446615649192435712</code>\n"
+            "📸 <b>يمكنك إرسال:</b>\n"
+            "1️⃣ <b>صورة إيصال التحويل (Screenshot)</b> 🖼️\n"
+            "2️⃣ أو كتابة <b>معرّف الطلب (Order ID / TxID)</b> نصياً 🔢\n\n"
+            "مثال للمعّرف: <code>446615649192435712</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "⚡ سيتم التحقق تلقائياً فور إرساله."
+            "👇 أرسل الصورة أو رقم المعاملة الآن:"
         ),
         "topup_binance_pending": (
-            "⏳ <b>جاري المراجعة...</b>\n\n"
+            "⏳ <b>تم استلام طلب الشحن بنجاح!</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{_E['money']}  المبلغ المُرسَل: <b>${{amount:.2f}}</b>\n"
-            "🔑  Transaction ID: <code>{tx_hash}</code>\n"
+            f"{_E['money']}  المبلغ: <b>${{amount:.2f}} USDT</b>\n"
+            "🔑  الإثبات / المعرّف: <code>{tx_hash}</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "⏱️ سيتم مراجعة طلبك خلال دقائق."
+            "⏱️ طلبك قيد المراجعة حالياً من قِبل الإدارة، وسيتم إضافة الرصيد إلى حسابك فور التأكد."
         ),
         "topup_binance_approved": (
-            f"{_E['party']} <b>تم تأكيد الشحن تلقائياً!</b> {_E['hundred']}\n\n"
+            f"{_E['party']} <b>تم قبول عملية الشحن وإضافة الرصيد!</b> {_E['hundred']}\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  المبلغ المُضاف: <b>${{amount:.2f}}</b>\n"
             "💰  رصيدك الجديد: <b>${new_balance:.2f}</b>\n"
@@ -346,8 +346,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "topup_binance_rejected": (
             f"{_E['alarm']} <b>تم رفض طلب الشحن</b>\n\n"
-            "لم يتم التحقق من عملية الدفع.\n"
-            "تواصل مع الدعم إذا كنت متأكداً من صحة العملية."
+            "لم يتم التحقق من عملية الدفع من قِبل الإدارة.\n"
+            "تواصل مع الدعم الفني إذا كنت متأكداً من صحة التحويل."
         ),
     },
 
@@ -607,15 +607,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_search":          "🔎  Search",
 
         # ── Binance Pay (Auto-verify) ─────────────────────────────
-        "btn_binance_manual": "🟡  Binance Pay — USDT Manual",
-        "btn_binance_pay":    "🟡  Binance Pay — USDT (Auto ⚡)",
+        "btn_binance_manual": "🟡  Binance Pay — USDT (Manual)",
+        "btn_binance_pay":    "🟡  Binance Pay — USDT (Manual)",
 
         "topup_binance_ask_amount": (
             f"{_E['money']} <b>Deposit via Binance Pay — USDT</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  Minimum: <b>${{min_usd:.2f}}</b>\n"
             "💱  Accepted currency: <b>USDT only</b>\n"
-            "⚡  Verification: <b>Instant & automatic</b>\n"
+            "🛡️  Verification: <b>Manual Admin Review 👨‍💻</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enter the amount you want to deposit in USD $:"
         ),
@@ -629,42 +629,42 @@ _STRINGS: dict[str, dict[str, str]] = {
             "🔑 <b>Wallet ID (Pay ID):</b>\n"
             "<code>{uid}</code>\n\n"
             f"{_E['warning']} <b>Send exactly ${{amount:.2f}} USDT via Binance Pay ID.</b>\n\n"
-            f"After sending, press {_E['thumbup']} <b>I Paid</b>"
+            f"After sending, press {_E['thumbup']} <b>I Paid</b> to submit proof or Order ID."
         ),
         "topup_binance_enter_amount": (
             f"{_E['money']} <b>Enter the amount you sent in $</b>\n\n"
             "<i>Example: 5 or 10.50</i>"
         ),
         "topup_binance_enter_hash": (
-            f"🔑 <b>Enter your Order ID</b>\n\n"
+            f"🔑 <b>Payment Proof Submission</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "📲 <b>How to find it:</b>\n"
-            "Binance app → Pay → Transaction History\n"
-            "→ Tap the transaction → Copy <b>Order ID</b>\n\n"
+            "📸 <b>You can send:</b>\n"
+            "1️⃣ <b>Payment screenshot / receipt</b> 🖼️\n"
+            "2️⃣ Or write your <b>Order ID / TxID</b> 🔢\n\n"
             "Example: <code>446615649192435712</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "⚡ Verification is instant and fully automatic."
+            "👇 Send screenshot or transaction ID now:"
         ),
         "topup_binance_pending": (
-            "⏳ <b>Review in progress...</b>\n\n"
+            "⏳ <b>Top-up request submitted!</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{_E['money']}  Amount sent: <b>${{amount:.2f}}</b>\n"
-            "🔑  Transaction ID: <code>{tx_hash}</code>\n"
+            f"{_E['money']}  Amount: <b>${{amount:.2f}} USDT</b>\n"
+            "🔑  Proof / ID: <code>{tx_hash}</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "⏱️ Your request will be reviewed shortly."
+            "⏱️ Your request is under review by admin and balance will be added once confirmed."
         ),
         "topup_binance_approved": (
-            f"{_E['party']} <b>Top-up Confirmed Automatically!</b> {_E['hundred']}\n\n"
+            f"{_E['party']} <b>Top-up Request Approved!</b> {_E['hundred']}\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  Amount added: <b>${{amount:.2f}}</b>\n"
             "💰  New balance: <b>${new_balance:.2f}</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Thank you for using the bot! {_E['fire']}"
+            f"Thank you for using our bot! {_E['fire']}"
         ),
         "topup_binance_rejected": (
             f"{_E['alarm']} <b>Top-up Request Rejected</b>\n\n"
-            "The payment could not be verified.\n"
-            "Contact support if you're sure the transaction was correct."
+            "The payment could not be verified by administration.\n"
+            "Contact support if you're sure the transfer was completed."
         ),
     },
     "fa": {
