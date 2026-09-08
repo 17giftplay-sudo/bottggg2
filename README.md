@@ -1,257 +1,286 @@
-# 📱 Telegram Accounts Store Bot
+# 📱 Telegram Accounts Store Bot (بوت متجر حسابات تيليجرام المتقدم)
 
-A fully-featured Telegram bot that lets you **sell Telegram accounts** to customers automatically — with built-in payments, an admin panel, and multi-language support.
+<div align="center">
 
----
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![aiogram](https://img.shields.io/badge/aiogram-3.17+-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-asyncpg-336791?style=for-the-badge&logo=postgresql&logoColor=white)
+![aiohttp](https://img.shields.io/badge/aiohttp-3.10+-blue?style=for-the-badge&logo=aiohttp&logoColor=white)
+![Cryptomus](https://img.shields.io/badge/Cryptomus-Pay-6C63FF?style=for-the-badge)
+![Binance Pay](https://img.shields.io/badge/Binance-Pay-F0B90B?style=for-the-badge&logo=binance&logoColor=black)
+![OxaPay](https://img.shields.io/badge/OxaPay-Gateway-00D09C?style=for-the-badge)
+![Telegram Stars](https://img.shields.io/badge/Telegram-Stars-FFD700?style=for-the-badge)
+![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white)
 
-> 💬 **Need help?** If you run into any issue at any step, contact support on Telegram: **[@Mohammed_Promoter](https://t.me/Mohammed_Promoter)**
+**A complete, production-ready, automated Telegram Account Marketplace & Session Delivery Bot with Multi-Gateway Payments, Proxy & API Rotation, and Sub-Admin Management.**
 
----
-
-## 📋 Table of Contents
-
-1. [What Does This Bot Do?](#-what-does-this-bot-do)
-2. [What You Need Before Starting](#-what-you-need-before-starting)
-3. [Step 1 — Create Your Telegram Bot](#step-1--create-your-telegram-bot)
-4. [Step 2 — Set Up a Free Database](#step-2--set-up-a-free-database)
-5. [Step 3 — Deploy on Railway (Free Hosting)](#step-3--deploy-on-railway-free-hosting)
-6. [Step 4 — Set Up Payments](#step-4--set-up-payments)
-7. [Step 5 — Add Your First Accounts to the Store (Stock)](#step-5--add-your-first-accounts-to-the-store-stock)
-8. [Admin Panel Guide](#-admin-panel-guide)
-9. [Bot Features Overview](#-bot-features-overview)
-10. [Frequently Asked Questions](#-frequently-asked-questions)
+**بوت متجر متكامل وتلقائي 100% لبيع حسابات تيليجرام وجلسات العمل، مع استلام تلقائي لرمز الدخول (OTP)، بوابات دفع متعددة، تدوير البروكسيات وبيانات API، ولوحة تحكم شاملة.**
 
 ---
 
-## 🤖 What Does This Bot Do?
+</div>
 
-This bot turns your Telegram into a **fully automated store** for selling Telegram accounts. Once set up, it runs 24/7 without you doing anything — customers browse, pay, and receive accounts automatically.
+## 📑 جدول المحتويات / Table of Contents
 
-**Key highlights:**
-- Customers top up their balance using **Cryptomus**, **Binance Pay**, or **Telegram Stars**
-- They browse accounts by **country**, buy instantly, and the account is delivered to them automatically
-- You manage everything through a private **Admin Panel** inside Telegram
-- Supports **English and Arabic** languages
-- Has a **referral system** so users can invite friends for rewards
-- Protects against bots with a **CAPTCHA** on first use
-
----
-
-## 🛠 What You Need Before Starting
-
-You don't need to be a developer. Just have the following ready:
-
-| What | Where to Get It | Cost |
-|------|----------------|------|
-| Telegram account | You already have one | Free |
-| Railway account (hosting) | [railway.app](https://railway.app) | Free tier available |
-| Bot Token | [@BotFather](https://t.me/BotFather) on Telegram | Free |
-| Your Telegram User ID | [@userinfobot](https://t.me/userinfobot) on Telegram | Free |
-| Payment credentials (optional) | Cryptomus or Binance Pay | Free to sign up |
+- [🌟 المميزات الرئيسية / Key Features](#-المميزات-الرئيسية--key-features)
+- [🏗️ بنية المشروع / Project Architecture](#️-بنية-المشروع--project-architecture)
+- [⚙️ متغيرات البيئة / Environment Variables](#️-متغيرات-البيئة--environment-variables)
+- [🚀 خطوات التشغيل والنشر / Deployment Guide](#-خطوات-التشغيل-والنشر--deployment-guide)
+  - [1. النشر على Railway / Deploying on Railway](#1-النشر-على-railway--deploying-on-railway)
+  - [2. التشغيل على سيرفر محلي أو VPS / VPS & Local Setup](#2-التشغيل-على-سيرفر-محلي-أو-vps--vps--local-setup)
+- [💳 إعداد بوابات الدفع / Payment Gateways Setup](#-إعداد-بوابات-الدفع--payment-gateways-setup)
+- [📦 إضافة الحسابات والمخزون / Stock Management](#-إضافة-الحسابات-والمخزون--stock-management)
+- [🛡️ الأمان وتدوير البروكسي / Security & Proxy Rotation](#️-الأمان-وتدوير-البروكسي--security--proxy-rotation)
+- [👑 لوحة الأدمن والمساعدين / Admin & Sub-Admin Panel](#-لوحة-الأدمن-والمساعدين--admin--sub-admin-panel)
+- [❓ الأسئلة الشائعة / FAQ](#-الأسئلة-الشائعة--faq)
 
 ---
 
-## Step 1 — Create Your Telegram Bot
+## 🌟 المميزات الرئيسية / Key Features
 
-1. Open Telegram and search for **@BotFather**
-2. Send the command `/newbot`
-3. Follow the prompts — choose a name and a username for your bot (username must end in `bot`, e.g. `myaccstore_bot`)
-4. BotFather will give you a **Bot Token** that looks like this:
-   ```
-   1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
-   ```
-5. **Copy and save this token** — you will need it in Step 3
+### 1. 📲 التسليم التلقائي لرمز الدخول (Instant Auto OTP Delivery)
+- يتصل البوت تلقائياً بالحساب المباع عبر مكتبة `Pyrogram` بمجرد إتمام الشراء.
+- عند طلب المستخدم لرمز تسجيل الدخول عبر تيليجرام، يلتقط البوت الرسالة من محادثة تيليجرام الرسمية ويرسل كود التحقق للمشتري فوراً.
+- دعم كلمة سر التحقق بخطوتين (2FA Password) التلقائية.
+- استرداد تلقائي للأموال إلى رصيد المشتري في حال عدم وصول الكود خلال المهلة المحددة (120 ثانية).
 
----
+### 2. 🗂️ دعم كافة أنواع الحسابات والجلسات (Sessions & TData Support)
+- دعم الجلسات النصية (String Sessions).
+- دعم ملفات `.session` بصيغة Pyrogram / Telethon.
+- دعم رفع ملفات الجلسات ومجلدات TData بشكل جماعي عبر أرشيف ZIP من لوحة الأدمن.
+- تحويل وتصدير تلقائي للجلسات.
 
-## Step 2 — Set Up a Free Database
+### 3. 💳 بوابات دفع تلقائية متعددة (4 Payment Gateways)
+- **Cryptomus:** دعم الدفع بالعملات الرقمية (USDT, TRX, TON, SOL, BTC, ETH...) مع تأكيد فوري عبر Webhook.
+- **Binance Pay:** دعم الدفع المباشر عبر تطبيق بينانس.
+- **OxaPay:** بوابة دفع كريبتو إضافية بدون قيود.
+- **Telegram Stars (نجوم تيليجرام):** شحن الرصيد المباشر عبر نجوم تيليجرام المدمجة داخل التطبيق مع تحديد سعر الصرف من لوحة التحكم.
 
-The bot needs a **PostgreSQL database** to store users, orders, and account stock. Railway provides one for free.
+### 4. 🌐 تدوير البروكسيات وحسابات API (Proxy & API Rotation)
+- **Proxy Pool:** دعم مجموعة بروكسيات لربط الحسابات مع مطابقة كود الدولة تلقائياً (`IP:PORT:USER:PASS:COUNTRY`).
+- **API Pool:** تدوير أزواج `api_id` و `api_hash` لتفادي قيود تيليجرام وحماية الحسابات من الحظر.
+- إمكانية تعيين `DEFAULT_API_ID` و `DEFAULT_API_HASH` عامين لتقليص حجم كود الحساب عند الإدخال.
 
-1. Go to [railway.app](https://railway.app) and sign in (or sign up)
-2. Click **New Project**
-3. Select **Deploy from GitHub repo** (you'll upload the files) — OR just click **+New → Database → PostgreSQL**
-4. Railway will create a database and show you a **DATABASE_URL** (looks like `postgresql://user:password@host/dbname`)
-5. **Copy and save this URL** — you will need it in Step 3
+### 5. 🛡️ الحماية ومكافحة السبام (Security & Anti-Flood)
+- كابتشا مصورة ذكية (Image CAPTCHA) تمنع الروبوتات من استهلاك موارد البوت.
+- نظام Throttling Middleware متقدم يمنع تكرار الضغط والسبام مع استجابة فائقة السرعة للأزرار وتجاوز تلقائي للأدمن.
+- نظام قفل الحسابات المحظورة وحماية المعاملات المالية داخل PostgreSQL Transactions لمنع تكرار شحن الرصيد (Double-Spending Protection).
 
----
+### 6. 👥 نظام المشرفين الفرعيين (Sub-Admin System)
+- إمكانية إضافة وتعيين مشرفين فرعيين (Sub-Admins) مع تحديد صلاحيات دقيقة لكل مشرف (إدارة المخزون، إدارة المستخدمين، الإحصائيات، إلخ).
 
-## Step 3 — Deploy on Railway (Free Hosting)
-
-This is where you actually run the bot.
-
-### Upload the Code
-
-1. Go to [railway.app](https://railway.app) → your project
-2. Click **+ New → GitHub Repo** and connect your GitHub account
-3. Upload the bot files to a GitHub repository (all the files from this zip, including `bot.py`, `handlers/`, etc.)
-4. Railway will detect the `Procfile` and automatically know how to start the bot
-
-### Set the Environment Variables
-
-This is the most important step. In Railway, go to your service → **Variables** tab and add the following:
-
-| Variable Name | Value | Required? |
-|---------------|-------|-----------|
-| `BOT_TOKEN` | Your Bot Token from BotFather | ✅ Yes |
-| `DATABASE_URL` | Your PostgreSQL URL from Step 2 | ✅ Yes |
-| `ADMIN_IDS` | Your Telegram User ID (e.g. `123456789`) | ✅ Yes |
-| `WEBHOOK_BASE_URL` | Your Railway app URL (e.g. `https://yourapp.up.railway.app`) | Recommended |
-| `CRYPTOMUS_MERCHANT_ID` | From your Cryptomus account | Optional |
-| `CRYPTOMUS_API_KEY` | From your Cryptomus account | Optional |
-| `BINANCE_PAY_API_KEY` | From your Binance merchant account | Optional |
-| `BINANCE_PAY_SECRET_KEY` | From your Binance merchant account | Optional |
-
-> ℹ️ **How to find your Telegram User ID:** Message [@userinfobot](https://t.me/userinfobot) and it will tell you your numeric ID.
-
-> ℹ️ **Multiple admins:** If you want more than one admin, separate their IDs with commas: `123456789,987654321`
-
-### Deploy
-
-Once variables are set, Railway will automatically deploy the bot. You should see logs confirming it started. Go to Telegram and send `/start` to your bot to test it.
+### 7. 📊 تقارير يومية ومراقبة القنوات (Daily Reports & Channel Monitor)
+- تقرير إحصائي تلقائي يومي للأدمن يوضح الأرباح، عدد المبيعات، والمستخدمين الجدد.
+- فحص الاشتراك الإجباري للقنوات ومراقبة خروج المستخدمين التلقائية.
 
 ---
 
-## Step 4 — Set Up Payments
+## 🏗️ بنية المشروع / Project Architecture
 
-The bot supports three payment methods. You only need to set up the ones you want to use.
-
-### 💳 Cryptomus (Cryptocurrency Payments)
-
-1. Go to [app.cryptomus.com](https://app.cryptomus.com) and create an account
-2. Navigate to **Settings → Payments API**
-3. Copy your **Merchant ID** and **API Key**
-4. Add them to Railway variables: `CRYPTOMUS_MERCHANT_ID` and `CRYPTOMUS_API_KEY`
-5. In Cryptomus, set your webhook URL to: `https://yourapp.up.railway.app/webhook/cryptomus`
-
-### 💛 Binance Pay
-
-1. Go to [merchant.binance.com](https://merchant.binance.com) and register as a merchant
-2. Navigate to **API Management** and create an API key
-3. Copy your **API Key** and **Secret Key**
-4. Add them to Railway variables: `BINANCE_PAY_API_KEY` and `BINANCE_PAY_SECRET_KEY`
-5. In Binance, set your webhook URL to: `https://yourapp.up.railway.app/webhook/binance`
-
-### ⭐ Telegram Stars
-
-This works automatically — no setup needed. Customers can pay directly using Telegram's built-in Stars currency.
+```
+├── bot.py                     # نقطة الانطلاق الرئيسية وتشغيل البوت وخادم الويب
+├── config.py                  # تحميل وقراءة متغيرات البيئة وإعدادات البروكسي وAPI
+├── database.py                # قاعدة بيانات PostgreSQL (asyncpg) بجميع الدوال والعمليات
+├── generate_session.py        # سكربت لتوليد String Session للحسابات بسهولة
+├── keyboards.py               # كيبوردات وتخطيطات أزرار المستخدم والأدمن
+├── states.py                  # حالات FSM للمستخدمين ولوحة الإدارة
+├── translations.py            # ملف الترجمة ثنائي اللغة (العربية 🇸🇦 والإنجليزية 🇺🇸)
+├── web_app_ads.html           # تطبيق Web App مصغر اختياري للإعلانات
+├── requirements.txt           # مكتبات بايثون المطلوبة
+├── Procfile                   # ملف تشغيل المشروع على السحابة (Railway / Heroku)
+├── handlers/                  # معالجات الأوامر والأحداث
+│   ├── start.py               # أمر /start، الكابتشا، الاشتراك الإجباري
+│   ├── buy.py                 # تصفح الدول وشراء الحسابات والتسليم التلقائي
+│   ├── sessions_buy.py        # شراء واستلام ملفات الجلسات (.session)
+│   ├── top_up_final.py        # شحن الرصيد وبوابات الدفع
+│   ├── profile.py             # الملف الشخصي وسجل العمليات ونظام الإحالة
+│   ├── admin.py               # لوحة الأدمن الرئيسية وإدارة المخزون والأسعار
+│   ├── admin_sessions.py      # إدارة جلسات العمل ورفع ملفات ZIP
+│   ├── sub_admin.py           # إدارة وتعيين المساعدين والصلاحيات
+│   ├── code_actions.py        # طلب الكود وتأكيد استلام OTP
+│   ├── daily_report.py        # التقارير اليومية للأرباح والمبيعات
+│   └── channel_monitor.py     # مراقبة قنوات الاشتراك الإجباري
+├── payments/                  # خوادم وبوابات الدفع الإلكتروني
+│   ├── webhook_server.py      # خادم استقبال الويب هوك (Aiohttp Webhook Server)
+│   ├── cryptomus.py           # تكامل Cryptomus API
+│   ├── binance_pay.py         # تكامل Binance Pay API
+│   └── oxapay.py              # تكامل OxaPay API
+└── utils/                     # الأدوات المساعدة
+    ├── captcha.py             # توليد صور الكابتشا
+    ├── security_guard.py      # فحص الحسابات والأمان
+    ├── session_converter.py   # تحويل صيغ الجلسات
+    ├── session_delivery.py    # تسليم ملفات الجلسات للمشتري
+    ├── session_manager.py     # إدارة اتصالات Pyrogram والتنظيف
+    ├── stars_rating_checker.py# فحص ومعالجة نجوم تيليجرام
+    └── zip_parser.py          # فك واستخراج ملفات ZIP للجلسات
+```
 
 ---
 
-## Step 5 — Add Your First Accounts to the Store (Stock)
+## ⚙️ متغيرات البيئة / Environment Variables
 
-Before customers can buy anything, you need to add Telegram accounts to your inventory. This requires generating a **session string** for each account.
+قم بإعداد المتغيرات التالية في إعدادات الاستضافة (مثل Railway Variables أو ملف `.env`):
 
-### Generate a Session String
+| المتغير / Variable | الوصف / Description | إجباري؟ / Required | مثال / Example |
+|---|---|:---:|---|
+| `BOT_TOKEN` | توكن البوت من [@BotFather](https://t.me/BotFather) | ✅ نعم | `1234567890:ABCdef...` |
+| `DATABASE_URL` | رابط قاعدة بيانات PostgreSQL | ✅ نعم | `postgresql://user:pass@host:port/dbname` |
+| `ADMIN_IDS` | معرفات تيليجرام للأدمن (مفصولة بفواصل) | ✅ نعم | `123456789,987654321` |
+| `WEBHOOK_BASE_URL` | رابط النطاق الخارجي لاستقبال Webhooks الدفع | 💡 مستحسن | `https://your-app.up.railway.app` |
+| `PORT` | المنفذ لخادم الويب الداخلي (الافتراضي: 8080) | ⚙️ اختياري | `8080` |
+| `CRYPTOMUS_MERCHANT_ID` | معرّف التاجر في بوابة Cryptomus | 💳 اختياري | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `CRYPTOMUS_API_KEY` | مفتاح الدفع (Payment API Key) من Cryptomus | 💳 اختياري | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
+| `BINANCE_PAY_API_KEY` | مفتاح API من حساب تاجر Binance Pay | 💳 اختياري | `binance_api_key_here` |
+| `BINANCE_PAY_SECRET_KEY`| المفتاح السري من حساب تاجر Binance Pay | 💳 اختياري | `binance_secret_key_here` |
+| `OXAPAY_MERCHANT_KEY` | المفتاح التجاري من بوابة OxaPay | 💳 اختياري | `sandbox` أو مفتاحك التجاري |
+| `DEFAULT_API_ID` | معرف API افتراضي لحسابات تيليجرام | ⚙️ اختياري | `2040` |
+| `DEFAULT_API_HASH` | كود API Hash افتراضي | ⚙️ اختياري | `b18441a1260828d0ed5d60f4eb70e775` |
+| `API_POOL` | قائمة بأزواج API متعددة للتدوير | ⚙️ اختياري | `id1:hash1,id2:hash2,id3:hash3` |
+| `PROXY_POOL` | قائمة بالبروكسيات للتدوير مع دعم الدول | ⚙️ اختياري | `ip:port:user:pass:US,ip:port:user:pass:GB` |
 
-For each Telegram account you want to sell, do the following:
+---
 
-1. Open a terminal/command prompt on your computer
-2. Make sure Python is installed: [python.org/downloads](https://python.org/downloads)
-3. Install the required library by running:
-   ```
-   pip install pyrogram tgcrypto
-   ```
-4. Run the session generator:
-   ```
+## 🚀 خطوات التشغيل والنشر / Deployment Guide
+
+### 1. النشر على Railway / Deploying on Railway
+
+1. افتح حساباً على [Railway.app](https://railway.app).
+2. أنشئ مشروعاً جديداً **New Project** واختر **Provision PostgreSQL** لإنشاء قاعدة بيانات مجانية.
+3. اضغط **+ New → GitHub Repo** واربط المستودع الحالي.
+4. اذهب إلى تبويب **Variables** في الخدمة وأضف المتغيرات الأساسية:
+   - `BOT_TOKEN`
+   - `DATABASE_URL` (اربطه بمتغير `${{Postgres.DATABASE_URL}}`)
+   - `ADMIN_IDS`
+   - `WEBHOOK_BASE_URL` (رابط الدومين المجاني من قسم Networking في Railway)
+5. سيتم تشغيل البوت تلقائياً بفضل ملف `Procfile` المدمج.
+
+---
+
+### 2. التشغيل على سيرفر محلي أو VPS / VPS & Local Setup
+
+```bash
+# 1. استنساخ المستودع
+git clone https://github.com/17giftplay-sudo/bottggg2.git
+cd bottggg2
+
+# 2. إنشاء بيئة بايثون افتراضية وتفعيلها
+python -m venv venv
+# Linux / macOS:
+source venv/bin/activate
+# Windows:
+.\venv\Scripts\activate
+
+# 3. تثبيت المتطلبات
+pip install -r requirements.txt
+
+# 4. ضبط المتغيرات (مثال على Linux/macOS):
+export BOT_TOKEN="your_bot_token"
+export DATABASE_URL="postgresql://user:password@localhost:5432/botdb"
+export ADMIN_IDS="123456789"
+
+# 5. تشغيل البوت
+python bot.py
+```
+
+---
+
+## 💳 إعداد بوابات الدفع / Payment Gateways Setup
+
+### 🔹 1. Cryptomus
+- أنشئ حساباً على [Cryptomus.com](https://cryptomus.com).
+- من لوحة التحكم، استخرج `Merchant ID` و `API Key`.
+- عيّن رابط الـ Webhook في لوحة Cryptomus على:
+  ```
+  https://your-domain.com/webhook/cryptomus
+  ```
+
+### 🔹 2. Binance Pay
+- أنشئ حساب تاجر على [Binance Merchant](https://merchant.binance.com).
+- استخرج `API Key` و `Secret Key`.
+- عيّن رابط الـ Webhook على:
+  ```
+  https://your-domain.com/webhook/binance
+  ```
+
+### 🔹 3. OxaPay
+- أنشئ حساباً على [OxaPay.com](https://oxapay.com).
+- احصل على `Merchant Key` وضعه في المتغير `OXAPAY_MERCHANT_KEY`.
+- عيّن رابط الـ Webhook على:
+  ```
+  https://your-domain.com/webhook/oxapay
+  ```
+
+### 🔹 4. Telegram Stars (نجوم تيليجرام)
+- تعمل بشكل تلقائي وتدمج مع بوتك مباشرة دون الحاجة لأي مفاتيح خارجية.
+- يمكنك تعديل سعر صرف النجمة مقابل الدولار من داخل لوحة الأدمن في تيليجرام.
+
+---
+
+## 📦 إضافة الحسابات والمخزون / Stock Management
+
+### الطريقة 1: توليد جلسة حساب فردي (Single Session String)
+1. شغّل سكربت التوليد:
+   ```bash
    python generate_session.py
    ```
-5. Follow the prompts:
-   - Go to [my.telegram.org](https://my.telegram.org) → **API Development Tools** → create an app → copy the **API ID** and **API Hash**
-   - Enter the phone number of the account you want to sell (with country code, e.g. `+1234567890`)
-   - Enter the OTP code that Telegram sends to that phone
-6. The script will output a line like:
+2. أدخل رقم الهاتف والرمز المستلم من تيليجرام.
+3. انسخ السطر الناتج بالشكل:
    ```
-   +1234567890::12345::abc123hash::BQABAgAB...longstring...
+   +1234567890::12345::abc123hash::BQABAgAB...longsessionstring...
    ```
-7. **Copy this line** — it is your account data to paste into the admin panel
+   *أو بالشكل المختصر في حال تفعيل `DEFAULT_API_ID`:*
+   ```
+   +1234567890::BQABAgAB...longsessionstring...
+   ```
+4. افتح البوت في تيليجرام وارسل `/admin` ← **إدارة المخزون** ← **إضافة حساب**.
 
-### Add the Account via Admin Panel
-
-1. In Telegram, send `/admin` to your bot
-2. Go to **Stock Management → Add Account to Stock**
-3. First, make sure the country exists (see Admin Panel guide below)
-4. Paste the session string line you generated above
-5. The account is now in stock and available for purchase ✅
-
----
-
-## 🛠 Admin Panel Guide
-
-Send `/admin` to your bot to open the admin panel. Here's what each section does:
-
-### 👤 User Management
-- **Add/Deduct Balance** — manually change a user's balance by their Telegram ID
-- **View user info** — look up any user by their ID
-
-### 📦 Stock Management
-- **Add Country** — add a new country category (e.g. "United States", code "US", price in USD, flag emoji like 🇺🇸)
-- **Update Country Price** — change the selling price for a country
-- **Add Account to Stock** — paste session strings here to add inventory
-- **View Stock** — see how many accounts are available per country
-
-### 🔗 Links & Channels
-- **Force Subscribe Channel** — set a channel that users must join before using the bot
-- **Support Link** — set the link shown when users click "Get Support"
-- **Sell Account Link** — set the link shown when users click "Sell Accounts"
-
-### 📢 Info Buttons
-- Configure up to several custom information buttons that appear in the bot's menu
-
-### ⭐ Telegram Stars Settings
-- Set the conversion rate between Stars and USD
-
-### 📊 Bot Statistics
-- View total users, total orders, revenue, and other stats
+### الطريقة 2: الرفع الجماعي كملف ZIP (Bulk ZIP Upload)
+1. اجمع ملفات الجلسات `.session` أو مجلدات `tdata` في ملف مضغوط `.zip`.
+2. افتح `/admin` ← **إدارة الجلسات** ← **رفع ملف ZIP**.
+3. يقوم البوت تلقائياً بفك الضغط، وفحص الجلسات، وفرزها حسب الدولة، وإدراجها في قاعدة البيانات فوراً.
 
 ---
 
-## ✨ Bot Features Overview
+## 🛡️ الأمان وتدوير البروكسي / Security & Proxy Rotation
 
-| Feature | Details |
-|---------|---------|
-| 🌐 Languages | English and Arabic |
-| 🔒 CAPTCHA | Image-based captcha protects against bots on first use |
-| 📢 Force Subscribe | Require users to join your channel before accessing the bot |
-| 💳 Payments | Cryptomus (crypto), Binance Pay, Telegram Stars |
-| 🛒 Account Delivery | Automatic — account delivered instantly after purchase |
-| 💸 Referral System | Users get rewards for inviting friends |
-| 📊 Profile / History | Users can view their purchase history |
-| 🔑 Session Login | Bot handles Telegram login code automatically after purchase |
-| 🛠 Admin Panel | Full management panel accessible via `/admin` |
+للحفاظ على الحسابات من الحظر وضمان سرعة التسليم، يدعم البوت بروكسيات SOCKS5 / HTTP:
+- قم بتهيئة متغير `PROXY_POOL` كالتالي:
+  ```env
+  PROXY_POOL="1.2.3.4:8080:user:pass:US,5.6.7.8:8080:user:pass:EG,9.10.11.12:8080:user:pass"
+  ```
+- عند طلب كود لحساب برقم أمريكي `+1`، سيبحث البوت عن بروكسي أمريكي (`US`) أولاً لتقليل مخاطر الأمان في تيليجرام.
 
 ---
 
-## ❓ Frequently Asked Questions
+## 👑 لوحة الأدمن والمساعدين / Admin & Sub-Admin Panel
 
-**Q: The bot doesn't start — what do I check?**
-Make sure all three required variables are set in Railway: `BOT_TOKEN`, `DATABASE_URL`, and `ADMIN_IDS`. The bot will not start without them.
+بإرسال أمر `/admin` في تيليجرام، تتاح لك الخيارات التالية:
 
-**Q: I can't access the admin panel.**
-Make sure your Telegram User ID is correctly set in the `ADMIN_IDS` variable. You can get your ID by messaging [@userinfobot](https://t.me/userinfobot).
-
-**Q: Payments aren't working.**
-Check that your webhook URL is correctly set in both Railway (`WEBHOOK_BASE_URL`) and your payment provider's dashboard. The URL must match exactly.
-
-**Q: A customer paid but their balance didn't update.**
-This is usually a webhook issue. Make sure your `WEBHOOK_BASE_URL` is correct and your Railway app is publicly accessible.
-
-**Q: How do I add more accounts?**
-Run `generate_session.py` for each account and paste the output into the admin panel under **Stock Management → Add Account to Stock**.
-
-**Q: Can I add more than one admin?**
-Yes — add multiple Telegram IDs separated by commas in the `ADMIN_IDS` variable. Example: `111222333,444555666`
+- 💵 **إدارة الرصيد:** شحن أو خصم رصيد أي مستخدم بالـ ID وعرض تفاصيل حسابه.
+- 🌍 **إدارة الدول والأسعار:** إضافة دول جديدة، تعديل سعر الحسابات لكل دولة، وتحديد الحد الأدنى للإيداع.
+- 📦 **المخزون المباشر:** عرض الكميات المتوفرة وتصدير بيانات الحسابات وحذف الحسابات المباعة أو التالفة.
+- 👥 **المساعدين (Sub-Admins):** إضافة وإزالة مشرفين فرعيين وتحديد صلاحياتهم لمنع الوصول للمعلومات الحساسة.
+- 📢 **الاشتراك الإجباري:** تعيين قنوات يلزم الاشتراك بها قبل استخدام البوت.
+- 📊 **الإحصائيات والتقارير:** استعراض إجمالي المستخدمين، المبيعات، الأرباح اليومية والشهرية، وتصدير التقارير.
+- ⚙️ **وضع الصيانة (Maintenance Mode):** إيقاف البوت مؤقتاً للعامة أثناء التحديثات بنقرة زر.
 
 ---
 
-## 📞 Support
+## ❓ الأسئلة الشائعة / FAQ
 
-If you encounter any problem that is not covered in this guide, please reach out directly:
+**س: هل يتطلب البوت وجود تطبيق تيليجرام مفتوح لاستلام الكود؟**  
+ج: لا، البوت يتصل بسيرفرات تيليجرام عبر بروتوكول MTProto مباشرة ويستلم الكود بشكل آلي بالكامل 24/7.
 
-**Telegram: [@Mohammed_Promoter](https://t.me/Mohammed_Promoter)**
+**س: ماذا يحدث إذا لم يستلم العميل الكود؟**  
+ج: بعد مرور 120 ثانية، يقوم البوت بإلغاء الطلب وإرجاع كامل المبلغ تلقائياً إلى محفظة العميل داخل البوت.
 
-Response is typically fast. Please describe your issue clearly and mention which step you are stuck on.
+**س: هل يدعم البوت التحقق بخطوتين (2FA)؟**  
+ج: نعم، يدعم إضافة كلمة سر 2FA مع الحساب ويتم تسليمها للمشتري تلقائياً مع الكود.
 
 ---
 
-*Thank you for purchasing this bot. We wish you great success with your store! 🚀*
+<div align="center">
+
+**Developed with ❤️ for high performance & reliability.**
+
+</div>
