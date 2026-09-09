@@ -1,7 +1,7 @@
 import logging
 
 from aiogram import Router, Bot, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
@@ -112,22 +112,28 @@ async def _show_main_menu(target, user: dict, edit: bool = False):
 # ── /start ────────────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, bot: Bot):
+async def cmd_start(message: Message, state: FSMContext, bot: Bot, command: CommandObject = None):
     try:
         await state.clear()
 
-        # استخراج معرّف الداعي من بارامتر /start
-        raw_text = message.text or ""
+        # استخراج معرّف الداعي من بارامتر /start أو CommandObject
         referrer_id = None
-        parts = raw_text.strip().split()
-        if len(parts) > 1:
-            param = parts[1].strip()
-            if param.startswith("ref_"):
-                ref_str = param[4:]
-                if ref_str.isdigit():
-                    referrer_id = int(ref_str)
-            elif param.isdigit():
-                referrer_id = int(param)
+        ref_str = ""
+        if command and command.args:
+            ref_str = command.args.strip()
+        else:
+            raw_text = message.text or ""
+            parts = raw_text.strip().split()
+            if len(parts) > 1:
+                ref_str = parts[1].strip()
+
+        if ref_str:
+            if ref_str.startswith("ref_"):
+                ref_num = ref_str[4:]
+                if ref_num.isdigit():
+                    referrer_id = int(ref_num)
+            elif ref_str.isdigit():
+                referrer_id = int(ref_str)
 
         user = await get_user(message.from_user.id)
         is_new_user = False
