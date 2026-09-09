@@ -162,36 +162,65 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             )
             return
 
-        # إذا كان مستخدماً جديداً دخل عبر إحالة ولم يتحقق جهازه بعد
-        if is_new_user and referrer_id and referrer_id != message.from_user.id:
-            await state.update_data(pending_referrer_id=referrer_id)
-            require_fp = (await get_setting("referral_require_fp") or "1") == "1"
-            if require_fp:
-                from config import WEBHOOK_BASE_URL
-                from aiogram.types import WebAppInfo
-                from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-                wh_url = (await get_setting("webhook_base_url") or WEBHOOK_BASE_URL).rstrip("/")
-                verify_url = f"{wh_url}/ref-verify" if wh_url else "https://verify.pandastore.online"
-
-                builder = InlineKeyboardBuilder()
-                builder.button(
-                    text="🛡️  تأكيد أمان جهازي (Web App)" if lang == "ar" else "🛡️  Verify Device (Web App)",
-                    web_app=WebAppInfo(url=verify_url),
+        # فحص نظام الإحالات والتحقق من أمان الجهاز
+        if referrer_id:
+            if referrer_id == message.from_user.id:
+                await message.answer(
+                    "⚠️ <b>هذا هو رابط الدعوة الخاص بك!</b> 🎁\n\n"
+                    "لا يمكنك تسجيل إحالة لنفسك. شارك هذا الرابط مع أصدقائك أو في القنوات، وستحصل على مكافأة مالية في رصيدك فور قيامهم بتأكيد أجهزتهم."
+                    if lang == "ar" else
+                    "⚠️ <b>This is your own referral link!</b> 🎁\n\n"
+                    "You cannot refer yourself. Share this link with friends to earn rewards."
                 )
-                builder.adjust(1)
+            else:
+                user_referred_by = user.get("referred_by") if user else None
+                dev_verified = user.get("is_device_verified", 0) if user else 0
 
-                verify_prompt = (
-                    "🛡️ <b>التحقق الأمني من الجهاز لمنع الغش</b> 🔒\n\n"
-                    "أهلاً بك! لقد تم تحويلك عبر رابط دعوة خاص بأحد الأصدقاء 🎁.\n\n"
-                    "⚠️ لحماية نظام المكافآت من الحسابات الوهمية وتعدد الحسابات، يرجى الضغط على الزر أدناه لتأكيد جهازك بنقرة واحدة:"
-                ) if lang == "ar" else (
-                    "🛡️ <b>Anti-Fraud Device Verification</b> 🔒\n\n"
-                    "Welcome! You joined via a friend's referral link 🎁.\n\n"
-                    "⚠️ To protect our rewards system against multi-accounts and bots, please click the button below to verify your device:"
-                )
-                await message.answer(verify_prompt, reply_markup=builder.as_markup(), parse_mode="HTML")
-                return
+                # إذا لم يكن مسجلاً بإحالة سابقة أو لم يتحقق جهازه بعد
+                if not user_referred_by and not dev_verified:
+                    await state.update_data(pending_referrer_id=referrer_id)
+                    require_fp = (await get_setting("referral_require_fp") or "1") == "1"
+                    if require_fp:
+                        from config import WEBHOOK_BASE_URL
+                        from aiogram.types import WebAppInfo
+                        from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+                        raw_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL") or "bottggg2-production.up.railway.app"
+                        wh_url = (
+                            await get_setting("webhook_base_url")
+                            or os.environ.get("WEBHOOK_BASE_URL")
+                            or (f"https://{raw_domain}" if raw_domain else "")
+                            or "https://bottggg2-production.up.railway.app"
+                        ).rstrip("/")
+                        if not wh_url.startswith("http"):
+                            wh_url = f"https://{wh_url}"
+
+                        verify_url = f"{wh_url}/ref-verify"
+
+                        builder = InlineKeyboardBuilder()
+                        builder.button(
+                            text="🛡️  تأكيد أمان جهازي (Web App)" if lang == "ar" else "🛡️  Verify Device (Web App)",
+                            web_app=WebAppInfo(url=verify_url),
+                        )
+                        builder.adjust(1)
+
+                        verify_prompt = (
+                            "🛡️ <b>التحقق الأمني من الجهاز لمنع الغش</b> 🔒\n\n"
+                            "أهلاً بك! لقد تم تحويلك عبر رابط دعوة خاص بأحد الأصدقاء 🎁.\n\n"
+                            "⚠️ لحماية نظام المكافآت من الحسابات الوهمية وتعدد الحسابات، يرجى الضغط على الزر أدناه لتأكيد جهازك بنقرة واحدة:"
+                        ) if lang == "ar" else (
+                            "🛡️ <b>Anti-Fraud Device Verification</b> 🔒\n\n"
+                            "Welcome! You joined via a friend's referral link 🎁.\n\n"
+                            "⚠️ To protect our rewards system against multi-accounts and bots, please click the button below to verify your device:"
+                        )
+                        await message.answer(verify_prompt, reply_markup=builder.as_markup(), parse_mode="HTML")
+                        return
+                else:
+                    await message.answer(
+                        "ℹ️ <b>تنبيه:</b> لقد تم تسجيل وتأكيد حسابك مسبقاً في النظام."
+                        if lang == "ar" else
+                        "ℹ️ <b>Notice:</b> Your account is already registered and verified in the system."
+                    )
 
         await _show_main_menu(message, user)
     except Exception as e:
