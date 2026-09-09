@@ -36,8 +36,12 @@ async def show_profile(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(text=t(lang, "btn_history"), callback_data="menu:history")
+    builder.button(
+        text="🎁  دعوة الأصدقاء والأرباح" if lang == "ar" else ("🎁  کسب درآمد و زیرمجموعه" if lang == "fa" else "🎁  Referral & Earn"),
+        callback_data="menu:referral"
+    )
     builder.button(text=t(lang, "btn_back"),    callback_data="menu:main")
-    builder.adjust(1)
+    builder.adjust(1, 1, 1)
 
     await callback.message.edit_text(
         t(

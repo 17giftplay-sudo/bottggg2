@@ -61,13 +61,16 @@ def main_menu_keyboard(
         topup_text = "💳  Top Up Balance"
     builder.button(text=topup_text, callback_data="menu:topup")
 
-    # 3. الملف الشخصي
+    # 3. الملف الشخصي ونظام الإحالة
     if lang == "fa":
         builder.button(text="👤  پروفایل من", callback_data="menu:profile")
+        builder.button(text="🎁  کسب درآمد و زیرمجموعه", callback_data="menu:referral")
     elif lang == "ar":
         builder.button(text="👤  ملفي الشخصي", callback_data="menu:profile")
+        builder.button(text="🎁  دعوة الأصدقاء والأرباح", callback_data="menu:referral")
     else:
         builder.button(text="👤  My Profile", callback_data="menu:profile")
+        builder.button(text="🎁  Referral & Earn", callback_data="menu:referral")
 
     # 4. الدعم الفني والمعلومات
     if lang == "fa":
@@ -92,9 +95,9 @@ def main_menu_keyboard(
         builder.button(text="🌐  Change Language", callback_data="menu:change_language")
 
     if info_enabled:
-        builder.adjust(2, 1, 1, 2, 1)
+        builder.adjust(2, 1, 2, 2, 1)
     else:
-        builder.adjust(2, 1, 1, 1, 1)
+        builder.adjust(2, 1, 2, 1, 1)
     return builder.as_markup()
 
 
