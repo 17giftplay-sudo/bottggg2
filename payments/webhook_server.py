@@ -663,7 +663,5 @@ def create_app() -> web.Application:
     app.router.add_post("/webhook/binance",   handle_binance)
     app.router.add_post("/oxapay_callback",   handle_oxapay)
     app.router.add_get("/ref-verify",         handle_ref_verify)
-    app.router.add_get("/ref-ip-check",       handle_ref_ip_check)
-    app.router.add_get("/ref-ip-info",        handle_ref_ip_info)
     app.router.add_get("/health",             handle_health)
     return app
