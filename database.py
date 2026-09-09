@@ -279,12 +279,53 @@ async def init_db():
             ("sell_btn_enabled",        "1"),
             ("info_btn_enabled",        "1"),
             ("binance_pay_uid",         ""),
+            ("referral_enabled",        "1"),
+            ("referral_reward_usd",     "0.05"),
+            ("referral_require_fp",     "1"),
         ]
         for key, value in defaults:
             await db.execute(
                 "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING",
                 key, value,
             )
+
+        # ── نظام الإحالة المتقدم وبصمة الأجهزة المانعة للغش ───────────
+        for col, definition in [
+            ("referred_by",         "BIGINT"),
+            ("device_fingerprint",  "TEXT"),
+            ("is_device_verified",  "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition}")
+            except Exception:
+                pass
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS device_fingerprints (
+                id               SERIAL PRIMARY KEY,
+                user_id          BIGINT NOT NULL,
+                fingerprint_hash TEXT NOT NULL,
+                ip_address       TEXT,
+                user_agent       TEXT,
+                created_at       TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_fp_hash ON device_fingerprints(fingerprint_hash)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_fp_user_id ON device_fingerprints(user_id)")
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS referral_logs (
+                id           SERIAL PRIMARY KEY,
+                referrer_id  BIGINT NOT NULL,
+                referred_id  BIGINT NOT NULL,
+                reward_usd   NUMERIC(12,4) DEFAULT 0.0,
+                status       TEXT DEFAULT 'pending',
+                fraud_reason TEXT,
+                created_at   TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ref_referrer ON referral_logs(referrer_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ref_referred ON referral_logs(referred_id)")
 
         # تصحيح وتصفير أرباح الإحالات السابقة المضخمة إلى 0.005$ بدقة لكل إحالة
         await db.execute(
@@ -2130,4 +2171,197 @@ async def purchase_accounts_as_sessions(
                 "country_name": country["country_name"],
                 "flag_emoji":   country.get("flag_emoji", "🌍"),
             }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── نظام الإحالة المتقدم وبصمة الأجهزة المانعة للغش (Anti-Fraud Referral System)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def check_and_save_device_fingerprint(
+    user_id: int,
+    fp_hash: str,
+    ip: str = "",
+    ua: str = "",
+) -> Tuple[bool, Optional[int], str]:
+    """
+    يفحص بصمة الجهاز لمنع تكرار الحسابات على نفس الهاتف أو الكمبيوتر.
+    يُرجع: (is_blocked: bool, duplicate_user_id: Optional[int], reason: str)
+    """
+    if not fp_hash or len(fp_hash) < 16:
+        return False, None, "INVALID_FP"
+
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        # 1. هل نفس بصمة الجهاز مسجلة لمستخدم آخر؟
+        existing_fp = await db.fetchrow(
+            """
+            SELECT user_id FROM device_fingerprints
+            WHERE fingerprint_hash = $1 AND user_id != $2
+            ORDER BY id ASC LIMIT 1
+            """,
+            fp_hash, user_id,
+        )
+        if existing_fp:
+            dup_id = existing_fp["user_id"]
+            return True, dup_id, "DUPLICATE_DEVICE"
+
+        # 2. فحص الـ IP (إذا كان الـ IP مسجلاً لأكثر من 4 حسابات مختلفة)
+        if ip and ip not in ("127.0.0.1", "localhost", "::1", ""):
+            ip_count = await db.fetchval(
+                """
+                SELECT COUNT(DISTINCT user_id) FROM device_fingerprints
+                WHERE ip_address = $1 AND user_id != $2
+                """,
+                ip, user_id,
+            )
+            if ip_count and ip_count >= 4:
+                return True, None, "IP_RATE_EXCEEDED"
+
+        # 3. حفظ البصمة لهذا المستخدم
+        await db.execute(
+            """
+            INSERT INTO device_fingerprints (user_id, fingerprint_hash, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4)
+            """,
+            user_id, fp_hash, ip, ua,
+        )
+        await db.execute(
+            """
+            UPDATE users
+            SET device_fingerprint = $1, is_device_verified = 1
+            WHERE user_id = $2
+            """,
+            fp_hash, user_id,
+        )
+        _invalidate_user_cache(user_id)
+        return False, None, "OK"
+
+
+async def process_referral_reward(
+    referred_id: int,
+    referrer_id: int,
+    reward_usd: float = 0.05,
+) -> Tuple[bool, str, float]:
+    """
+    يربط الإحالة ويمنح المكافأة للداعي داخل معاملة ذرية آمنة.
+    يُرجع: (success: bool, reason: str, new_referrer_balance: float)
+    """
+    if referred_id == referrer_id:
+        return False, "SELF_REFERRAL", 0.0
+
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        async with db.transaction():
+            # التحقق من أن الداعي موجود
+            referrer = await db.fetchrow(
+                "SELECT balance FROM users WHERE user_id = $1 FOR UPDATE",
+                referrer_id,
+            )
+            if not referrer:
+                return False, "REFERRER_NOT_FOUND", 0.0
+
+            # التحقق من أن المدعو لم يُحل مسبقاً
+            user_row = await db.fetchrow(
+                "SELECT referred_by FROM users WHERE user_id = $1 FOR UPDATE",
+                referred_id,
+            )
+            if user_row and user_row.get("referred_by"):
+                return False, "ALREADY_REFERRED", float(referrer["balance"])
+
+            # التحقق من عدم تسجيل نفس الإحالة في logs
+            prev_log = await db.fetchrow(
+                "SELECT id FROM referral_logs WHERE referred_id = $1 AND status = 'approved'",
+                referred_id,
+            )
+            if prev_log:
+                return False, "ALREADY_REWARDED", float(referrer["balance"])
+
+            # ربط الإحالة
+            await db.execute(
+                "UPDATE users SET referred_by = $1 WHERE user_id = $2",
+                referrer_id, referred_id,
+            )
+
+            new_bal = float(referrer["balance"])
+            if reward_usd > 0:
+                new_bal = await db.fetchval(
+                    """
+                    UPDATE users
+                    SET balance = balance + $1
+                    WHERE user_id = $2
+                    RETURNING balance
+                    """,
+                    reward_usd, referrer_id,
+                )
+                await db.execute(
+                    """
+                    INSERT INTO transactions (user_id, type, amount, description)
+                    VALUES ($1, 'referral_reward', $2, $3)
+                    """,
+                    referrer_id, reward_usd, f"مكافأة دعوة مستخدم جديد ({referred_id})",
+                )
+
+            await db.execute(
+                """
+                INSERT INTO referral_logs (referrer_id, referred_id, reward_usd, status)
+                VALUES ($1, $2, $3, 'approved')
+                """,
+                referrer_id, referred_id, reward_usd,
+            )
+
+            _invalidate_user_cache(referrer_id)
+            _invalidate_user_cache(referred_id)
+            return True, "OK", float(new_bal) if new_bal is not None else 0.0
+
+
+async def log_referral_fraud(referrer_id: int, referred_id: int, fraud_reason: str):
+    """يسجل محاولة غش محظورة في الإحالات."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute(
+            """
+            INSERT INTO referral_logs (referrer_id, referred_id, reward_usd, status, fraud_reason)
+            VALUES ($1, $2, 0.0, 'blocked_fraud', $3)
+            """,
+            referrer_id, referred_id, fraud_reason,
+        )
+
+
+async def get_user_referral_stats(user_id: int) -> Dict[str, Any]:
+    """يجلب إحصائيات الإحالة للمستخدم."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        total_referrals = await db.fetchval(
+            "SELECT COUNT(*) FROM referral_logs WHERE referrer_id = $1 AND status = 'approved'",
+            user_id,
+        ) or 0
+        total_earned = await db.fetchval(
+            "SELECT COALESCE(SUM(reward_usd), 0) FROM referral_logs WHERE referrer_id = $1 AND status = 'approved'",
+            user_id,
+        ) or 0.0
+        return {
+            "total_referrals": int(total_referrals),
+            "total_earned": float(total_earned),
+        }
+
+
+async def get_admin_referral_stats() -> Dict[str, Any]:
+    """يجلب إحصائيات الإحالات العامة للأدمن."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        total_approved = await db.fetchval(
+            "SELECT COUNT(*) FROM referral_logs WHERE status = 'approved'"
+        ) or 0
+        total_blocked = await db.fetchval(
+            "SELECT COUNT(*) FROM referral_logs WHERE status = 'blocked_fraud'"
+        ) or 0
+        total_paid = await db.fetchval(
+            "SELECT COALESCE(SUM(reward_usd), 0) FROM referral_logs WHERE status = 'approved'"
+        ) or 0.0
+        return {
+            "total_approved": int(total_approved),
+            "total_blocked": int(total_blocked),
+            "total_paid": float(total_paid),
+        }
+
 

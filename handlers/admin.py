@@ -4319,3 +4319,133 @@ async def admin_live_cleanup_no(callback: CallbackQuery):
         reply_markup=builder.as_markup(),
     )
     await callback.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── إعدادات نظام الإحالة ومكافحة الغش (Admin Referral Settings)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data == "admin:referral_settings")
+async def admin_referral_settings(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    ref_enabled = (await get_setting("referral_enabled") or "1") == "1"
+    reward_usd = float(await get_setting("referral_reward_usd") or "0.05")
+
+    from keyboards import admin_referral_settings_keyboard
+    status_str = "🟢 مفعّل" if ref_enabled else "🔴 معطّل"
+    text = (
+        "🎁 <b>إعدادات نظام الإحالة ومكافحة الغش</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"• حالة النظام: <b>{status_str}</b>\n"
+        f"• قيمة مكافأة الإحالة: <b>${reward_usd:.2f} USDT</b>\n"
+        "• فحص بصمة الأجهزة (Hardware Fingerprinting): <b>نشط تلقائياً 🛡️</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👇 اختر الإجراء المطلوب:"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_referral_settings_keyboard(ref_enabled, reward_usd),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:toggle_referral")
+async def admin_toggle_referral(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    cur = (await get_setting("referral_enabled") or "1") == "1"
+    new_val = "0" if cur else "1"
+    await set_setting("referral_enabled", new_val)
+    reward_usd = float(await get_setting("referral_reward_usd") or "0.05")
+
+    from keyboards import admin_referral_settings_keyboard
+    status_str = "🟢 مفعّل" if new_val == "1" else "🔴 معطّل"
+    text = (
+        "🎁 <b>إعدادات نظام الإحالة ومكافحة الغش</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"• حالة النظام: <b>{status_str}</b>\n"
+        f"• قيمة مكافأة الإحالة: <b>${reward_usd:.2f} USDT</b>\n"
+        "• فحص بصمة الأجهزة (Hardware Fingerprinting): <b>نشط تلقائياً 🛡️</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👇 اختر الإجراء المطلوب:"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_referral_settings_keyboard(new_val == "1", reward_usd),
+        parse_mode="HTML",
+    )
+    await callback.answer("تم تغيير حالة النظام بنجاح!", show_alert=True)
+
+
+@router.callback_query(F.data == "admin:set_referral_reward")
+async def admin_set_referral_reward_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    await state.set_state(AdminState.waiting_for_referral_reward_usd)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ إلغاء", callback_data="admin:referral_settings")
+    await callback.message.edit_text(
+        "💵 <b>تعديل مكافأة الإحالة</b>\n\n"
+        "أرسل قيمة المكافأة الجديدة بالدولار التي يحصل عليها الداعي عند انضمام وتأكيد جهاز كل عضو جديد:\n"
+        "<i>مثال: 0.05 أو 0.10 أو 0.25</i>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AdminState.waiting_for_referral_reward_usd)
+async def admin_set_referral_reward_received(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = float(message.text.strip().replace(",", "."))
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح (مثال: 0.10)")
+        return
+
+    await state.clear()
+    await set_setting("referral_reward_usd", str(val))
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 رجوع لإعدادات الإحالة", callback_data="admin:referral_settings")
+    await message.answer(
+        f"✅ <b>تم حفظ مكافأة الإحالة بنجاح:</b> <b>${val:.2f}</b> لكل إحالة مؤكدة.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "admin:referral_stats")
+async def admin_referral_stats_view(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    from database import get_admin_referral_stats
+    stats = await get_admin_referral_stats()
+
+    approved = stats.get("total_approved", 0)
+    blocked  = stats.get("total_blocked", 0)
+    paid     = stats.get("total_paid", 0.0)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 رجوع", callback_data="admin:referral_settings")
+
+    text = (
+        "📊 <b>إحصائيات نظام الإحالة والحماية</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"✅  <b>إجمالي الإحالات المقبولة والفريدة:</b> <b>{approved}</b>\n"
+        f"🛡️  <b>محاولات الغش المحظورة (أجهزة مكررة):</b> <b>{blocked}</b>\n"
+        f"💵  <b>إجمالي المكافآت المدفوعة:</b> <b>${paid:.2f} USDT</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>النظام يعمل بكفاءة عالية ويحظر تلقائياً أي محاولة لإنشاء حسابات وهمية من نفس الجهاز.</i>"
+    )
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+

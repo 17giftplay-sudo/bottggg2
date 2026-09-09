@@ -427,6 +427,228 @@ async def handle_ref_ip_info(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+_REF_DEVICE_VERIFY_HTML = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>التحقق الأمني من الجهاز</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg-color: #0f172a;
+    --card-bg: rgba(30, 41, 59, 0.7);
+    --primary: #38bdf8;
+    --primary-glow: rgba(56, 189, 248, 0.3);
+    --success: #10b981;
+    --error: #ef4444;
+    --text: #f8fafc;
+    --text-muted: #94a3b8;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  body {
+    background: radial-gradient(circle at top, #1e293b, #0f172a);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: var(--card-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    padding: 32px 24px;
+    width: 100%;
+    max-width: 360px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  }
+  .shield-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 20px;
+    border-radius: 50%;
+    background: rgba(56, 189, 248, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--primary);
+    box-shadow: 0 0 25px var(--primary-glow);
+    animation: pulse 2s infinite ease-in-out;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 20px var(--primary-glow); }
+    50% { transform: scale(1.05); box-shadow: 0 0 35px var(--primary-glow); }
+  }
+  h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  p { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin-bottom: 24px; }
+  .progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #38bdf8, #818cf8);
+    border-radius: 10px;
+    transition: width 0.3s ease;
+  }
+  .status-text { font-size: 13px; color: var(--primary); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="shield-icon" id="icon">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <path d="m9 12 2 2 4-4"/>
+    </svg>
+  </div>
+  <h2 id="title">فحص أمان الجهاز</h2>
+  <p id="desc">جاري التحقق من بصمة الجهاز ومطابقتها لمنع تعدد الحسابات الوهمية...</p>
+  <div class="progress-bar">
+    <div class="progress-fill" id="pbar"></div>
+  </div>
+  <div class="status-text" id="status">جاري توليد البصمة المشفرة (0%)...</div>
+</div>
+
+<script>
+const tg = window.Telegram.WebApp;
+try { tg.ready(); tg.expand(); } catch(e){}
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function getCanvasFP() {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 240; canvas.height = 60;
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = "top";
+    ctx.font = "14px 'Arial', sans-serif";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#f60";
+    ctx.fillRect(125,1,62,20);
+    ctx.fillStyle = "#069";
+    ctx.fillText("PandaStoreAuth, AntiFraud🔒", 2, 15);
+    ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+    ctx.fillText("TelegramStoreDeviceFP 2026", 4, 17);
+    return canvas.toDataURL();
+  } catch(e) { return "canvas_error"; }
+}
+
+function getWebGLFP() {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return "no_webgl";
+    const dbgRenderInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    const vendor = dbgRenderInfo ? gl.getParameter(dbgRenderInfo.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+    const renderer = dbgRenderInfo ? gl.getParameter(dbgRenderInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    return `${vendor}~${renderer}`;
+  } catch(e) { return "webgl_error"; }
+}
+
+async function getAudioFP() {
+  try {
+    const AudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!AudioContext) return "no_audio";
+    const ctx = new AudioContext(1, 44100, 44100);
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(10000, ctx.currentTime);
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.setValueAtTime(-50, ctx.currentTime);
+    comp.knee.setValueAtTime(40, ctx.currentTime);
+    comp.ratio.setValueAtTime(12, ctx.currentTime);
+    comp.attack.setValueAtTime(0, ctx.currentTime);
+    comp.release.setValueAtTime(0.25, ctx.currentTime);
+    osc.connect(comp);
+    comp.connect(ctx.destination);
+    osc.start(0);
+    const rendered = await ctx.startRendering();
+    let sum = 0;
+    for (let i = 4500; i < 5000; i++) {
+      sum += Math.abs(rendered.getChannelData(0)[i]);
+    }
+    return sum.toString();
+  } catch(e) { return "audio_error"; }
+}
+
+async function runVerification() {
+  const pbar = document.getElementById("pbar");
+  const status = document.getElementById("status");
+  
+  pbar.style.width = "30%";
+  status.innerText = "فحص قدرات العرض والجرافيكس...";
+  
+  const canvasData = getCanvasFP();
+  const webglData = getWebGLFP();
+  
+  await new Promise(r => setTimeout(r, 200));
+  pbar.style.width = "65%";
+  status.innerText = "فحص معالج الصوت ومواصفات العتاد...";
+  
+  const audioData = await getAudioFP();
+  
+  const hardware = {
+    screen: `${screen.width}x${screen.height}x${screen.colorDepth}@${window.devicePixelRatio||1}`,
+    cores: navigator.hardwareConcurrency || 0,
+    memory: navigator.deviceMemory || 0,
+    touch: navigator.maxTouchPoints || 0,
+    platform: navigator.platform || "",
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    lang: navigator.language || ""
+  };
+  
+  pbar.style.width = "90%";
+  status.innerText = "توليد المعرّف الأمني الفريد...";
+  
+  const rawFingerprint = `${canvasData}|${webglData}|${audioData}|${JSON.stringify(hardware)}`;
+  const fpHash = await sha256(rawFingerprint);
+  
+  pbar.style.width = "100%";
+  status.innerText = "✅ تم تأكيد الجهاز بنجاح!";
+  
+  const payload = {
+    type: "device_verification",
+    fp_hash: fpHash,
+    hardware: hardware,
+    webgl: webglData,
+    timestamp: Date.now()
+  };
+  
+  setTimeout(() => {
+    try {
+      tg.sendData(JSON.stringify(payload));
+      tg.close();
+    } catch(e) {
+      status.innerText = "اضغط رجوع للعودة للبوت";
+    }
+  }, 600);
+}
+
+window.onload = runVerification;
+</script>
+</body>
+</html>"""
+
+
+async def handle_ref_verify(request: web.Request) -> web.Response:
+    """يعرض صفحة الـ Web App الخاصة بفحص بصمة الجهاز."""
+    return web.Response(text=REF_DEVICE_VERIFY_HTML if 'REF_DEVICE_VERIFY_HTML' in globals() else _REF_DEVICE_VERIFY_HTML, content_type="text/html", charset="utf-8")
+
+
 # ── Health check ──────────────────────────────────────────────────────────────
 
 async def handle_health(request: web.Request) -> web.Response:
@@ -436,12 +658,11 @@ async def handle_health(request: web.Request) -> web.Response:
 # ── App factory ───────────────────────────────────────────────────────────────
 
 def create_app() -> web.Application:
-    # ملاحظة: لا حاجة لاستبدال أي placeholder ثابت — الـ nonce يُضاف ديناميكياً
-    # في كل طلب داخل handle_ref_ip_check عبر .replace("%%NONCE%%", nonce)
     app = web.Application()
     app.router.add_post("/webhook/cryptomus", handle_cryptomus)
     app.router.add_post("/webhook/binance",   handle_binance)
     app.router.add_post("/oxapay_callback",   handle_oxapay)
+    app.router.add_get("/ref-verify",         handle_ref_verify)
     app.router.add_get("/ref-ip-check",       handle_ref_ip_check)
     app.router.add_get("/ref-ip-info",        handle_ref_ip_info)
     app.router.add_get("/health",             handle_health)

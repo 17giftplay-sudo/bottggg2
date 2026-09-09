@@ -99,9 +99,24 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     try:
         await state.clear()
 
+        # استخراج معرّف الداعي من بارامتر /start
+        raw_text = message.text or ""
+        referrer_id = None
+        parts = raw_text.strip().split()
+        if len(parts) > 1:
+            param = parts[1].strip()
+            if param.startswith("ref_"):
+                ref_str = param[4:]
+                if ref_str.isdigit():
+                    referrer_id = int(ref_str)
+            elif param.isdigit():
+                referrer_id = int(param)
+
         user = await get_user(message.from_user.id)
+        is_new_user = False
 
         if not user:
+            is_new_user = True
             user = await create_user(
                 user_id=message.from_user.id,
                 username=message.from_user.username,
@@ -128,13 +143,14 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
                 "points": 0,
             }
 
+        lang = user.get("language") or "ar"
+
+        # فحص الاشتراك الإجباري أولاً
         joined = True
         try:
             joined = await _check_force_sub(bot, message.from_user.id)
         except Exception as e:
             logger.warning("_check_force_sub exception for user %s: %s", message.from_user.id, e)
-
-        lang = user.get("language") or "ar"
 
         if not joined:
             ch1  = await get_setting("force_sub_channel")
@@ -145,6 +161,37 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
                 parse_mode="HTML",
             )
             return
+
+        # إذا كان مستخدماً جديداً دخل عبر إحالة ولم يتحقق جهازه بعد
+        if is_new_user and referrer_id and referrer_id != message.from_user.id:
+            await state.update_data(pending_referrer_id=referrer_id)
+            require_fp = (await get_setting("referral_require_fp") or "1") == "1"
+            if require_fp:
+                from config import WEBHOOK_BASE_URL
+                from aiogram.types import WebAppInfo
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+                wh_url = (await get_setting("webhook_base_url") or WEBHOOK_BASE_URL).rstrip("/")
+                verify_url = f"{wh_url}/ref-verify" if wh_url else "https://verify.pandastore.online"
+
+                builder = InlineKeyboardBuilder()
+                builder.button(
+                    text="🛡️  تأكيد أمان جهازي (Web App)" if lang == "ar" else "🛡️  Verify Device (Web App)",
+                    web_app=WebAppInfo(url=verify_url),
+                )
+                builder.adjust(1)
+
+                verify_prompt = (
+                    "🛡️ <b>التحقق الأمني من الجهاز لمنع الغش</b> 🔒\n\n"
+                    "أهلاً بك! لقد تم تحويلك عبر رابط دعوة خاص بأحد الأصدقاء 🎁.\n\n"
+                    "⚠️ لحماية نظام المكافآت من الحسابات الوهمية وتعدد الحسابات، يرجى الضغط على الزر أدناه لتأكيد جهازك بنقرة واحدة:"
+                ) if lang == "ar" else (
+                    "🛡️ <b>Anti-Fraud Device Verification</b> 🔒\n\n"
+                    "Welcome! You joined via a friend's referral link 🎁.\n\n"
+                    "⚠️ To protect our rewards system against multi-accounts and bots, please click the button below to verify your device:"
+                )
+                await message.answer(verify_prompt, reply_markup=builder.as_markup(), parse_mode="HTML")
+                return
 
         await _show_main_menu(message, user)
     except Exception as e:
@@ -159,6 +206,103 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             "points": 0,
         }
         await _show_main_menu(message, fallback_user)
+
+
+# ── استلام بيانات فحص بصمة الجهاز من الـ Web App ──────────────────────────────
+
+@router.message(F.web_app_data)
+async def handle_web_app_verification(message: Message, state: FSMContext, bot: Bot):
+    import json
+    from database import (
+        check_and_save_device_fingerprint,
+        process_referral_reward,
+        log_referral_fraud,
+    )
+
+    try:
+        raw_data = message.web_app_data.data
+        payload = json.loads(raw_data)
+    except Exception as e:
+        logger.warning("Invalid WebApp data received: %s", e)
+        return
+
+    fp_hash = payload.get("fp_hash") or ""
+    hardware = payload.get("hardware") or {}
+    ua = hardware.get("platform") or ""
+
+    user = await get_user(message.from_user.id)
+    lang = user.get("language", "ar") if user else "ar"
+
+    state_data = await state.get_data()
+    pending_ref = state_data.get("pending_referrer_id")
+
+    # 1. فحص ومطابقة بصمة الجهاز
+    is_blocked, dup_uid, reason = await check_and_save_device_fingerprint(
+        user_id=message.from_user.id,
+        fp_hash=fp_hash,
+        ua=ua,
+    )
+
+    if is_blocked:
+        if pending_ref:
+            await log_referral_fraud(
+                referrer_id=pending_ref,
+                referred_id=message.from_user.id,
+                fraud_reason=f"DUPLICATE_DEVICE (matches {dup_uid or 'existing'})",
+            )
+        warn_text = (
+            "⚠️ <b>تنبيه أمني من نظام مكافحة الغش</b> 🛡️\n\n"
+            "تم رصد أن هذا الجهاز مسجّل مسبقاً في النظام بحساب آخر.\n"
+            "يمكنك متابعة استخدام البوت بشكل طبيعي ولكن <b>لن يتم احتساب مكافأة الإحالة</b> لمنع تكرار الأجهزة."
+        ) if lang == "ar" else (
+            "⚠️ <b>Anti-Fraud Security Notice</b> 🛡️\n\n"
+            "This device was detected as already registered with another account.\n"
+            "You can use the bot normally, but referral reward was not credited."
+        )
+        await message.answer(warn_text, parse_mode="HTML")
+    else:
+        # جهاز جديد وفريد
+        if pending_ref:
+            ref_enabled = (await get_setting("referral_enabled") or "1") == "1"
+            reward_usd = float(await get_setting("referral_reward_usd") or "0.05")
+            if ref_enabled:
+                ok, res_reason, new_bal = await process_referral_reward(
+                    referred_id=message.from_user.id,
+                    referrer_id=pending_ref,
+                    reward_usd=reward_usd,
+                )
+                if ok:
+                    try:
+                        ref_user = await get_user(pending_ref)
+                        ref_lang = ref_user.get("language", "ar") if ref_user else "ar"
+                        u_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
+                        notify_text = (
+                            f"🎉 <b>إحالة جديدة مؤكدة!</b> 🎁\n\n"
+                            f"قام المستخدم <b>{u_name}</b> بالانضمام عبر رابطك وتأكيد أمان جهازه بنجاح ✅\n\n"
+                            f"💵 <b>المكافأة المُضافة:</b> <b>+${reward_usd:.2f}</b>\n"
+                            f"💰 <b>رصيدك الجديد:</b> <b>${new_bal:.2f}</b>"
+                        ) if ref_lang == "ar" else (
+                            f"🎉 <b>New Verified Referral!</b> 🎁\n\n"
+                            f"User <b>{u_name}</b> joined via your link and verified device ✅\n\n"
+                            f"💵 <b>Reward Added:</b> <b>+${reward_usd:.2f}</b>\n"
+                            f"💰 <b>New Balance:</b> <b>${new_bal:.2f}</b>"
+                        )
+                        await bot.send_message(pending_ref, notify_text, parse_mode="HTML")
+                    except Exception as _e:
+                        logger.warning("Could not notify referrer %s: %s", pending_ref, _e)
+
+        success_text = (
+            "✅ <b>تم التحقق من أمان جهازك بنجاح!</b> 🎉\n\n"
+            "أهلاً بك في المتجر، يمكنك الآن البدء في استخدام البوت وشراء الخدمات."
+        ) if lang == "ar" else (
+            "✅ <b>Device Verified Successfully!</b> 🎉\n\n"
+            "Welcome to the store! You can now start using the bot."
+        )
+        await message.answer(success_text, parse_mode="HTML")
+
+    await state.clear()
+    user_fresh = await get_user(message.from_user.id)
+    await _show_main_menu(message, user_fresh or user)
 
 
 # ── الكابتشا ──────────────────────────────────────────────────────────────────
@@ -368,7 +512,7 @@ async def show_transfer(callback: CallbackQuery):
     await callback.answer()
 
 
-# ── رابط الدعوة ────────────────────────────────────────────────────────────────
+# ── رابط الدعوة ولوحة الإحصائيات ─────────────────────────────────────────────
 
 @router.callback_query(F.data == "menu:referral")
 async def show_referral(callback: CallbackQuery, bot: Bot):
@@ -376,18 +520,46 @@ async def show_referral(callback: CallbackQuery, bot: Bot):
     lang = user.get("language", "ar") if user else "ar"
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref_{callback.from_user.id}"
+
+    from database import get_user_referral_stats, get_setting
+    stats = await get_user_referral_stats(callback.from_user.id)
+    total_refs = stats.get("total_referrals", 0)
+    total_earned = stats.get("total_earned", 0.0)
+    reward_usd = float(await get_setting("referral_reward_usd") or "0.05")
+
+    import urllib.parse
+    share_url = f"https://t.me/share/url?url={ref_link}&text={urllib.parse.quote('متجر حسابات وجلسات تيليجرام التلقائي 🚀 اشتري حسابك الآن بسهولة وأمان!')}"
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔗  مشاركة الرابط عبر تيليجرام" if lang == "ar" else "🔗  Share via Telegram", url=share_url)
+    builder.button(text=t(lang, "btn_back"), callback_data="menu:main")
+    builder.adjust(1)
+
     ref_text = (
-        "🔗 <b>رابط الدعوة الخاص بك</b> 🎁\n\n"
-        "شارك الرابط مع أصدقائك واكسب نقاط ومكافآت مجانية عند كل عملية شراء يقومون بها!\n\n"
+        "👥 <b>نظام الإحالة والمكافآت</b> 🎁\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔗 <b>رابط الدعوة الخاص بك:</b>\n"
         f"<code>{ref_link}</code>\n\n"
-        "👆 <i>اضغط على الرابط لنسخه مباشرة.</i>"
+        "📊 <b>إحصائيات إحالاتك:</b>\n"
+        f"👥  عدد الإحالات المؤكدة: <b>{total_refs}</b>\n"
+        f"💵  إجمالي الأرباح المكتسبة: <b>${total_earned:.2f}</b>\n"
+        f"🎁  مكافأة كل دعوة جديدة: <b>${reward_usd:.2f}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "💡 <i>شارك رابطك مع أصدقائك واكسب رصيداً في محفظتك فور تأكيد أجهزتهم!</i>"
     ) if lang == "ar" else (
-        "🔗 <b>Your Referral Link</b> 🎁\n\n"
+        "👥 <b>Referral & Rewards Dashboard</b> 🎁\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔗 <b>Your Referral Link:</b>\n"
         f"<code>{ref_link}</code>\n\n"
-        "Share your link and earn rewards on every referral purchase!"
+        "📊 <b>Your Referral Stats:</b>\n"
+        f"👥  Verified Referrals: <b>{total_refs}</b>\n"
+        f"💵  Total Earned: <b>${total_earned:.2f}</b>\n"
+        f"🎁  Reward per referral: <b>${reward_usd:.2f}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "💡 <i>Share your link with friends and earn rewards as soon as their device is verified!</i>"
     )
-    from keyboards import back_to_main_keyboard
-    await callback.message.edit_text(ref_text, reply_markup=back_to_main_keyboard(lang), parse_mode="HTML")
+    await callback.message.edit_text(ref_text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 
 

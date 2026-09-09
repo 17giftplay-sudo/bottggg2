@@ -229,6 +229,7 @@ def admin_main_keyboard(maintenance_on: bool = False, sell_on: bool = True) -> I
     builder.button(text="🗄️  إدارة المخزون",       callback_data="admin:stock")
 
     builder.button(text="⭐  إعدادات النجوم",      callback_data="admin:stars")
+    builder.button(text="🎁  إعدادات الإحالة",     callback_data="admin:referral_settings")
     builder.button(text="🔗  الروابط الديناميكية", callback_data="admin:links")
     builder.button(text="👮  الأدمن الفرعيون",    callback_data="admin:sub_admins")
     if sell_on:
@@ -239,7 +240,20 @@ def admin_main_keyboard(maintenance_on: bool = False, sell_on: bool = True) -> I
         builder.button(text="🟢  تشغيل البوت",         callback_data="admin:maintenance")
     else:
         builder.button(text="🔴  إيقاف البوت للصيانة", callback_data="admin:maintenance")
-    builder.adjust(2, 1, 2, 1, 1, 1)
+    builder.adjust(2, 1, 2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def admin_referral_settings_keyboard(ref_enabled: bool = True, reward_usd: float = 0.05) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if ref_enabled:
+        builder.button(text="🟢 نظام الإحالة: مفعّل", callback_data="admin:toggle_referral")
+    else:
+        builder.button(text="🔴 نظام الإحالة: معطّل", callback_data="admin:toggle_referral")
+    builder.button(text=f"💵 مكافأة الدعوة: ${reward_usd:.2f}", callback_data="admin:set_referral_reward")
+    builder.button(text="📊 إحصائيات الإحالة ومحاولات الغش", callback_data="admin:referral_stats")
+    builder.button(text="🔙 رجوع", callback_data="admin:main")
+    builder.adjust(1, 1, 1, 1)
     return builder.as_markup()
 
 

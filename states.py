@@ -51,6 +51,7 @@ class AdminState(StatesGroup):
     waiting_for_info_button_url = State()
     waiting_for_delete_info_button_index = State()
     waiting_for_binance_uid = State()
+    waiting_for_referral_reward_usd = State()
     # ── إضافة حساب مباشرة عبر رقم الهاتف ─────────────────────
     waiting_for_live_phone     = State()
     waiting_for_live_otp       = State()
