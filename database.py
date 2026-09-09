@@ -520,6 +520,19 @@ async def reset_user_for_testing(user_id: int) -> bool:
         return False
 
 
+async def set_user_pending_referrer(user_id: int, referrer_id: int):
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as db:
+            await db.execute(
+                "UPDATE users SET referred_by = $1 WHERE user_id = $2 AND (referred_by IS NULL OR referred_by = 0)",
+                referrer_id, user_id,
+            )
+        _invalidate_user_cache(user_id)
+    except Exception as e:
+        logger.error("set_user_pending_referrer error for %s: %s", user_id, e)
+
+
 async def create_user(
     user_id: int,
     username: Optional[str],
@@ -2217,6 +2230,12 @@ async def check_and_save_device_fingerprint(
         )
         if existing_fp:
             dup_id = existing_fp["user_id"]
+            # نحدّث حالة التحقق للمستخدم لكي لا يعلق في شاشة التحقق، لكن بدون مكافأة
+            await db.execute(
+                "UPDATE users SET device_fingerprint = $1, is_device_verified = 1 WHERE user_id = $2",
+                fp_hash, user_id,
+            )
+            _invalidate_user_cache(user_id)
             return True, dup_id, "DUPLICATE_DEVICE"
 
         # 2. فحص الـ IP (إذا كان الـ IP مسجلاً لأكثر من 4 حسابات مختلفة)
@@ -2229,9 +2248,14 @@ async def check_and_save_device_fingerprint(
                 ip, user_id,
             )
             if ip_count and ip_count >= 4:
+                await db.execute(
+                    "UPDATE users SET device_fingerprint = $1, is_device_verified = 1 WHERE user_id = $2",
+                    fp_hash, user_id,
+                )
+                _invalidate_user_cache(user_id)
                 return True, None, "IP_RATE_EXCEEDED"
 
-        # 3. حفظ البصمة لهذا المستخدم
+        # 3. حفظ البصمة لهذا المستخدم الجديد
         await db.execute(
             """
             INSERT INTO device_fingerprints (user_id, fingerprint_hash, ip_address, user_agent)
@@ -2274,15 +2298,7 @@ async def process_referral_reward(
             if not referrer:
                 return False, "REFERRER_NOT_FOUND", 0.0
 
-            # التحقق من أن المدعو لم يُحل مسبقاً
-            user_row = await db.fetchrow(
-                "SELECT referred_by FROM users WHERE user_id = $1 FOR UPDATE",
-                referred_id,
-            )
-            if user_row and user_row.get("referred_by"):
-                return False, "ALREADY_REFERRED", float(referrer["balance"])
-
-            # التحقق من عدم تسجيل نفس الإحالة في logs
+            # التحقق من عدم تسجيل نفس الإحالة في logs مسبقاً
             prev_log = await db.fetchrow(
                 "SELECT id FROM referral_logs WHERE referred_id = $1 AND status = 'approved'",
                 referred_id,
@@ -2290,9 +2306,17 @@ async def process_referral_reward(
             if prev_log:
                 return False, "ALREADY_REWARDED", float(referrer["balance"])
 
-            # ربط الإحالة
+            # التحقق من أن المدعو لم يُسجل لداعي آخر
+            user_row = await db.fetchrow(
+                "SELECT referred_by FROM users WHERE user_id = $1 FOR UPDATE",
+                referred_id,
+            )
+            if user_row and user_row.get("referred_by") and user_row.get("referred_by") != referrer_id:
+                return False, "ALREADY_REFERRED_TO_OTHER", float(referrer["balance"])
+
+            # ربط وتثبيت الإحالة
             await db.execute(
-                "UPDATE users SET referred_by = $1 WHERE user_id = $2",
+                "UPDATE users SET referred_by = $1, is_device_verified = 1 WHERE user_id = $2",
                 referrer_id, referred_id,
             )
 
