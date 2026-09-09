@@ -5,6 +5,7 @@ import logging
 import random
 from typing import Optional
 from aiogram import Router, F, Bot
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -4448,6 +4449,58 @@ async def admin_referral_stats_view(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin:reset_devices_btn")
+async def admin_reset_devices_callback(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    from database import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute("DELETE FROM device_fingerprints")
+        await db.execute("UPDATE users SET device_fingerprint = NULL, is_device_verified = 0, referred_by = NULL")
+    await callback.answer("✅ تم تصفير جميع بصمات الأجهزة وحالات الإحالة لجميع الحسابات بنجاح!", show_alert=True)
+
+
+@router.callback_query(F.data == "admin:reset_user_btn")
+async def admin_reset_user_callback(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    await state.set_state(AdminState.waiting_for_reset_user_id)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ إلغاء", callback_data="admin:users")
+    await callback.message.edit_text(
+        "🗑️ <b>تصفير وحذف مستخدم للتجربة</b>\n\n"
+        "أرسل الآيدي الرقمي للمستخدم الذي تريد تصفيره (مثال: <code>726886536</code>):",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AdminState.waiting_for_reset_user_id)
+async def admin_reset_user_received(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    val = (message.text or "").strip()
+    if not val.isdigit():
+        await message.answer("❌ يرجى إدخال آيدي رقمي صحيح (مثال: 726886536)")
+        return
+    target_uid = int(val)
+    await state.clear()
+    from database import reset_user_for_testing
+    await reset_user_for_testing(target_uid)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 إدارة المستخدمين", callback_data="admin:users")
+    await message.answer(
+        f"✅ <b>تم تصفير وحذف المستخدم <code>{target_uid}</code> بنجاح!</b>\n\n"
+        "أصبح الحساب الآن جديداً كلياً ويمكنه تجربة رابط الإحالة وفحص البصمة كأنه يدخل لأول مرة.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("reset_user"))
