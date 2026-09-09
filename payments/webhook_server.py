@@ -618,24 +618,44 @@ async function runVerification() {
   const fpHash = await sha256(rawFingerprint);
   
   pbar.style.width = "100%";
-  status.innerText = "✅ تم تأكيد الجهاز بنجاح!";
+  status.innerText = "✅ جاري حفظ وتأكيد بيانات الأمان...";
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  let uid = parseInt(urlParams.get('uid') || '0', 10);
+  let ref = parseInt(urlParams.get('ref') || '0', 10);
+  
+  if (!uid && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
+    uid = window.Telegram.WebApp.initDataUnsafe.user.id;
+  }
   
   const payload = {
-    type: "device_verification",
+    user_id: uid,
+    ref_id: ref,
     fp_hash: fpHash,
     hardware: hardware,
-    webgl: webglData,
-    timestamp: Date.now()
+    webgl: webglData
   };
   
-  setTimeout(() => {
-    try {
-      tg.sendData(JSON.stringify(payload));
-      tg.close();
-    } catch(e) {
-      status.innerText = "اضغط رجوع للعودة للبوت";
-    }
-  }, 600);
+  try {
+    fetch('/ref-verify/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(() => {
+      status.innerText = "✅ تم التحقق بنجاح! جاري العودة للبوت...";
+      setTimeout(() => {
+        try { tg.close(); } catch(e) {}
+      }, 400);
+    }).catch(() => {
+      setTimeout(() => {
+        try { tg.close(); } catch(e) {}
+      }, 400);
+    });
+  } catch(e) {
+    setTimeout(() => {
+      try { tg.close(); } catch(e) {}
+    }, 400);
+  }
 }
 
 window.onload = runVerification;
@@ -647,6 +667,127 @@ window.onload = runVerification;
 async def handle_ref_verify(request: web.Request) -> web.Response:
     """يعرض صفحة الـ Web App الخاصة بفحص بصمة الجهاز."""
     return web.Response(text=REF_DEVICE_VERIFY_HTML if 'REF_DEVICE_VERIFY_HTML' in globals() else _REF_DEVICE_VERIFY_HTML, content_type="text/html", charset="utf-8")
+
+
+async def handle_ref_verify_submit(request: web.Request) -> web.Response:
+    """يستقبل نتائج فحص بصمة الجهاز مباشرة من صفحة الـ Web App ويعالج المكافأة فوراً."""
+    from database import (
+        check_and_save_device_fingerprint,
+        process_referral_reward,
+        log_referral_fraud,
+        get_user,
+        get_setting,
+    )
+    from keyboards import main_menu_keyboard
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.warning("Invalid JSON in handle_ref_verify_submit: %s", e)
+        return web.json_response({"status": "error", "message": "invalid_json"}, status=400)
+
+    user_id = int(body.get("user_id") or 0)
+    ref_id = int(body.get("ref_id") or 0)
+    fp_hash = str(body.get("fp_hash") or "")
+    hardware = body.get("hardware") or {}
+    ua = hardware.get("platform") or ""
+
+    if not user_id or not fp_hash:
+        return web.json_response({"status": "error", "message": "missing_params"}, status=400)
+
+    user = await get_user(user_id)
+    lang = user.get("language", "ar") if user else "ar"
+
+    is_blocked, dup_uid, reason = await check_and_save_device_fingerprint(
+        user_id=user_id,
+        fp_hash=fp_hash,
+        ua=ua,
+    )
+
+    if is_blocked:
+        if ref_id and ref_id != user_id:
+            await log_referral_fraud(
+                referrer_id=ref_id,
+                referred_id=user_id,
+                fraud_reason=f"DUPLICATE_DEVICE (matches {dup_uid or 'existing'})",
+            )
+        if _bot:
+            warn_text = (
+                "⚠️ <b>تنبيه أمني من نظام مكافحة الغش</b> 🛡️\n\n"
+                "تم رصد أن هذا الجهاز مسجّل مسبقاً في النظام بحساب آخر.\n"
+                "تم فتح المتجر لك، ولكن <b>لن يتم احتساب مكافأة الإحالة</b> لمنع تكرار الأجهزة."
+            ) if lang == "ar" else (
+                "⚠️ <b>Anti-Fraud Security Notice</b> 🛡️\n\n"
+                "This device was detected as already registered with another account.\n"
+                "Store unlocked, but referral reward was not credited."
+            )
+            try:
+                await _bot.send_message(user_id, warn_text, parse_mode="HTML")
+            except Exception:
+                pass
+    else:
+        # جهاز جديد وفريد
+        if ref_id and ref_id != user_id:
+            ref_enabled = (await get_setting("referral_enabled") or "1") == "1"
+            reward_usd = float(await get_setting("referral_reward_usd") or "0.05")
+            if ref_enabled:
+                ok, res_reason, new_bal = await process_referral_reward(
+                    referred_id=user_id,
+                    referrer_id=ref_id,
+                    reward_usd=reward_usd,
+                )
+                if ok and _bot:
+                    try:
+                        ref_user = await get_user(ref_id)
+                        ref_lang = ref_user.get("language", "ar") if ref_user else "ar"
+                        u_name = f"@{user.get('username')}" if (user and user.get("username")) else (user.get("first_name") or str(user_id) if user else str(user_id))
+                        notify_text = (
+                            f"🎉 <b>إحالة جديدة مؤكدة!</b> 🎁\n\n"
+                            f"قام المستخدم <b>{u_name}</b> بالانضمام عبر رابطك وتأكيد أمان جهازه بنجاح ✅\n\n"
+                            f"💵 <b>المكافأة المُضافة:</b> <b>+${reward_usd:.2f}</b>\n"
+                            f"💰 <b>رصيدك الجديد:</b> <b>${new_bal:.2f}</b>"
+                        ) if ref_lang == "ar" else (
+                            f"🎉 <b>New Verified Referral!</b> 🎁\n\n"
+                            f"User <b>{u_name}</b> joined via your link and verified device ✅\n\n"
+                            f"💵 <b>Reward Added:</b> <b>+${reward_usd:.2f}</b>\n"
+                            f"💰 <b>New Balance:</b> <b>${new_bal:.2f}</b>"
+                        )
+                        await _bot.send_message(ref_id, notify_text, parse_mode="HTML")
+                    except Exception as _e:
+                        logger.warning("Could not notify referrer %s: %s", ref_id, _e)
+
+        if _bot:
+            success_text = (
+                "✅ <b>تم التحقق من أمان جهازك بنجاح!</b> 🎉\n\n"
+                "أهلاً بك في المتجر، يمكنك الآن البدء في استخدام البوت وشراء الخدمات."
+            ) if lang == "ar" else (
+                "✅ <b>Device Verified Successfully!</b> 🎉\n\n"
+                "Welcome to the store! You can now start using the bot."
+            )
+            try:
+                await _bot.send_message(user_id, success_text, parse_mode="HTML")
+            except Exception:
+                pass
+
+    # إرسال القائمة الرئيسية المفتوحة للمستخدم
+    if _bot:
+        try:
+            from translations import t
+            sell_enabled = (await get_setting("sell_btn_enabled") or "1") == "1"
+            info_enabled = (await get_setting("info_btn_enabled") or "1") == "1"
+            fresh_u = await get_user(user_id)
+            bal = float((fresh_u.get("balance") if fresh_u else 0.0) or 0.0)
+            pts = int(float((fresh_u.get("points") if fresh_u else 0) or 0))
+            await _bot.send_message(
+                user_id,
+                t(lang, "welcome", user_id=user_id, balance=bal, points=pts),
+                reply_markup=main_menu_keyboard(lang, sell_enabled=sell_enabled, info_enabled=info_enabled),
+                parse_mode="HTML",
+            )
+        except Exception as _e:
+            logger.warning("Could not send main menu to user %s: %s", user_id, _e)
+
+    return web.json_response({"status": "ok"})
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -663,5 +804,6 @@ def create_app() -> web.Application:
     app.router.add_post("/webhook/binance",   handle_binance)
     app.router.add_post("/oxapay_callback",   handle_oxapay)
     app.router.add_get("/ref-verify",         handle_ref_verify)
+    app.router.add_post("/ref-verify/submit", handle_ref_verify_submit)
     app.router.add_get("/health",             handle_health)
     return app
