@@ -42,9 +42,9 @@ async def show_topup_menu(callback: CallbackQuery, state: FSMContext):
 async def topup_other_methods(callback: CallbackQuery, state: FSMContext):
     user = await get_user(callback.from_user.id)
     lang = user.get("language", "en") if user else "en"
-    url  = await get_setting("topup_other_url") or ""
-    if not url:
-        await callback.answer("⚠️ This method is not available yet. Contact support.", show_alert=True)
+    url = await get_setting("topup_other_url") or ""
+    if not url or not url.startswith("http"):
+        await callback.answer("⚠️ هذه الطريقة غير متاحة حالياً، تواصل مع الدعم." if lang == "ar" else "⚠️ This method is not available yet. Contact support.", show_alert=True)
         return
     builder = InlineKeyboardBuilder()
     builder.button(text="🔗 Open", url=url)

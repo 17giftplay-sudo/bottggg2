@@ -171,15 +171,27 @@ async def verify_transfer(
 
     try:
         async with aiohttp.ClientSession() as session:
-            # 1. مزامنة التوقيت الدقيق مع بايننس
+            # 1. مزامنة التوقيت الدقيق مع بايننس عبر عدة سيرفرات بديلة
             now_ms = int(time.time() * 1000)
-            try:
-                async with session.get("https://api.binance.com/api/v3/time", timeout=aiohttp.ClientTimeout(total=5)) as t_resp:
-                    t_data = await t_resp.json(content_type=None)
-                    if t_data.get("serverTime"):
-                        now_ms = int(t_data["serverTime"])
-            except Exception as _te:
-                logger.warning("Could not sync server time with Binance, using local: %s", _te)
+            binance_hosts = [
+                "https://api.binance.com",
+                "https://api1.binance.com",
+                "https://api2.binance.com",
+                "https://api3.binance.com",
+                "https://api4.binance.com",
+                "https://api-gcp.binance.com",
+            ]
+            proxy = os.environ.get("BINANCE_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+
+            for host in binance_hosts:
+                try:
+                    async with session.get(f"{host}/api/v3/time", proxy=proxy, timeout=aiohttp.ClientTimeout(total=4)) as t_resp:
+                        t_data = await t_resp.json(content_type=None)
+                        if t_data.get("serverTime"):
+                            now_ms = int(t_data["serverTime"])
+                            break
+                except Exception:
+                    continue
 
             start_ms = now_ms - (look_back_hours * 3600 * 1000)
 
@@ -197,18 +209,31 @@ async def verify_transfer(
                 hashlib.sha256,
             ).hexdigest()
 
-            url = f"https://api.binance.com/sapi/v1/pay/transactions?{query_str}&signature={signature}"
             headers = {"X-MBX-APIKEY": api_key}
+            data = None
+            last_err = ""
 
-            async with session.get(
-                url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                data = await resp.json(content_type=None)
+            for host in binance_hosts:
+                try:
+                    url = f"{host}/sapi/v1/pay/transactions?{query_str}&signature={signature}"
+                    async with session.get(
+                        url,
+                        headers=headers,
+                        proxy=proxy,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as resp:
+                        res = await resp.json(content_type=None)
+                        if str(res.get("code", "")) == "000000":
+                            data = res
+                            break
+                        else:
+                            last_err = f"Code {res.get('code')}: {res.get('message') or res.get('msg')}"
+                except Exception as _e:
+                    last_err = str(_e)
+                    continue
 
-        if str(data.get("code", "")) != "000000":
-            err_msg = f"Binance code {data.get('code')}: {data.get('message') or data.get('msg')}"
+        if not data or str(data.get("code", "")) != "000000":
+            err_msg = last_err or "Binance API call failed across all endpoints"
             logger.error(
                 "Binance verify_transfer API error: %s full_response=%s",
                 err_msg, data,
