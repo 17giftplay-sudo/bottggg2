@@ -284,3 +284,5 @@ python bot.py
 **Developed with ❤️ for high performance & reliability.**
 
 </div>
+
+<!-- Trigger Deploy -->
