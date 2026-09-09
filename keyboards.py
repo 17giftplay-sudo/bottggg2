@@ -255,9 +255,8 @@ def admin_referral_settings_keyboard(ref_enabled: bool = True, reward_usd: float
         builder.button(text="🔴 نظام الإحالة: معطّل", callback_data="admin:toggle_referral")
     builder.button(text=f"💵 مكافأة الدعوة: ${reward_usd:.2f}", callback_data="admin:set_referral_reward")
     builder.button(text="📊 إحصائيات الإحالة ومحاولات الغش", callback_data="admin:referral_stats")
-    builder.button(text="🧹 تصفير جميع الأجهزة للتجربة", callback_data="admin:reset_devices_btn")
     builder.button(text="🔙 رجوع", callback_data="admin:main")
-    builder.adjust(1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 1)
     return builder.as_markup()
 
 
@@ -267,9 +266,8 @@ def admin_users_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="➕  إضافة رصيد",    callback_data="admin:add_balance")
     builder.button(text="➖  خصم رصيد",      callback_data="admin:deduct_balance")
     builder.button(text="🪙  إضافة نقاط",   callback_data="admin:add_points")
-    builder.button(text="🗑️  تصفير مستخدم للتجربة", callback_data="admin:reset_user_btn")
     builder.button(text="🔙  رجوع",          callback_data="admin:main")
-    builder.adjust(1, 2, 1, 1, 1)
+    builder.adjust(1, 2, 1, 1)
     return builder.as_markup()
 
 

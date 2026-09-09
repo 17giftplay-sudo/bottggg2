@@ -64,14 +64,8 @@ class ThrottlingMiddleware(BaseMiddleware):
         elif event.callback_query and event.callback_query.from_user:
             user_id = event.callback_query.from_user.id
 
-        # فحص ديناميكي للأدمن لتجاوز أي قيود
-        is_admin_user = False
-        if user_id:
-            raw_admins = _os.getenv("ADMIN_IDS", "")
-            dynamic_admins = [int(x.strip()) for x in raw_admins.split(",") if x.strip().isdigit()]
-            is_admin_user = (user_id in dynamic_admins) or (user_id in ADMIN_IDS)
-
-        if user_id and not is_admin_user:
+        from handlers.admin import is_admin
+        if user_id and not is_admin(user_id):
             now = asyncio.get_event_loop().time()
             if user_id in self.cache:
                 delta = now - self.cache[user_id]
@@ -103,7 +97,8 @@ class MaintenanceMiddleware(BaseMiddleware):
         elif event.callback_query and event.callback_query.from_user:
             user_id = event.callback_query.from_user.id
 
-        if user_id and user_id not in ADMIN_IDS:
+        from handlers.admin import is_admin
+        if user_id and not is_admin(user_id):
             try:
                 maintenance = await get_setting("maintenance_mode")
                 if maintenance == "1":
@@ -138,7 +133,8 @@ class BanMiddleware(BaseMiddleware):
         elif event.callback_query and event.callback_query.from_user:
             user_id = event.callback_query.from_user.id
 
-        if user_id and user_id not in ADMIN_IDS:
+        from handlers.admin import is_admin
+        if user_id and not is_admin(user_id):
             try:
                 user = await get_user(user_id)
                 if user and user.get("is_banned"):
