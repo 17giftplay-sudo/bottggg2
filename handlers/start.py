@@ -41,25 +41,42 @@ async def _send_captcha(message: Message, state: FSMContext, lang: str = "en", a
     )
 
 
+def _clean_channel_id(ch: str) -> str:
+    if not ch:
+        return ""
+    ch = ch.strip()
+    if ch.startswith("https://t.me/joinchat/") or ch.startswith("https://t.me/+"):
+        return ch
+    if ch.startswith("https://t.me/"):
+        ch = ch.replace("https://t.me/", "")
+    elif ch.startswith("http://t.me/"):
+        ch = ch.replace("http://t.me/", "")
+    elif ch.startswith("t.me/"):
+        ch = ch.replace("t.me/", "")
+    ch = ch.strip("/")
+    if ch and not ch.startswith("@") and not ch.startswith("-") and not ch.isdigit():
+        ch = f"@{ch}"
+    return ch
+
+
 async def _check_force_sub(bot: Bot, user_id: int) -> bool:
-    channels = []
     ch1 = await get_setting("force_sub_channel")
-    ch2 = await get_setting("notification_channel")
-    if ch1:
-        channels.append(ch1)
-    if ch2 and ch2 != ch1:
-        channels.append(ch2)
-    if not channels:
+    if not ch1 or ch1 in ("0", "—", "none", "None", ""):
         return True
-    for channel in channels:
-        try:
-            member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
-            if member.status in ("left", "kicked", "banned"):
-                return False
-        except Exception as e:
-            logger.warning("_check_force_sub: failed to check %s for user %s: %s", channel, user_id, e)
+
+    ch = _clean_channel_id(ch1)
+    if not ch:
+        return True
+
+    try:
+        target_id = int(ch) if (ch.startswith("-") or ch.isdigit()) else ch
+        member = await bot.get_chat_member(chat_id=target_id, user_id=user_id)
+        if member.status in ("left", "kicked", "banned"):
             return False
-    return True
+        return True
+    except Exception as e:
+        logger.warning("_check_force_sub: failed to check %s (target: %s) for user %s: %s", ch1, ch, user_id, e)
+        return False
 
 
 def _welcome_text(lang: str, user: dict) -> str:
