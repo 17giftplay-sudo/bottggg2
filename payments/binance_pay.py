@@ -139,62 +139,66 @@ VERIFY_AMOUNT_TOO_LOW = "amount_too_low" # ❌ المبلغ أقل من الحد
 
 async def verify_transfer(
     tx_id: str,
-    look_back_hours: int = 5,   # 5 ساعات فقط — يمنع إعادة استخدام الرموز القديمة
+    look_back_hours: int = 24,   # 24 ساعة للبحث في معاملات اليوم بالكامل
 ) -> tuple:
     """
-    التحقق من تحويل Binance Pay عبر Transaction ID.
-
-    يُرجع tuple (status, actual_amount):
-      VERIFY_OK, amount        — تم التحقق، actual_amount = المبلغ الفعلي المُحوَّل.
-      VERIFY_API_ERROR, 0.0    — فشل الاتصال — أرسل للأدمن للمراجعة اليدوية.
-      VERIFY_NOT_FOUND, 0.0    — الـ tx_id غير موجود.
-      VERIFY_WRONG_CURRENCY, 0.0 — العملة ليست USDT.
-      VERIFY_AMOUNT_TOO_LOW, amount — المبلغ أقل من الحد الأدنى.
-
-    يتطلب: API Key بصلاحية "Enable Reading" من حساب Binance الذي يستقبل المدفوعات.
+    التحقق من تحويل Binance Pay عبر Transaction ID أو Order ID.
+    يستخدم مزامنة الوقت المباشرة مع سيرفرات بايننس لمنع أي خطأ توقيت (Time Offset).
     """
-    # استخدام BINANCE_SPOT_API_KEY / BINANCE_SPOT_SECRET_KEY إذا وُجدا،
-    # وإلا الرجوع إلى BINANCE_PAY_API_KEY / BINANCE_PAY_SECRET_KEY كاحتياط.
     from config import MIN_DEPOSIT_USD
+    from database import get_setting
 
-    api_key    = _clean_credential(_SPOT_API_KEY) or _clean_credential(BINANCE_PAY_API_KEY)
-    secret_key = _clean_credential(_SPOT_SECRET_KEY) or _clean_credential(BINANCE_PAY_SECRET_KEY)
-    if not api_key or not secret_key:
-        logger.error("Binance Spot API key غير مضبوط — إرسال للمراجعة اليدوية.")
-        return VERIFY_API_ERROR, 0.0
-
-    # ── تشخيص: هل يُستخدم مفتاح Spot المنفصل أم مفتاح Pay القديم؟ ──────────
-    using_spot = bool(_clean_credential(_SPOT_API_KEY))
-    logger.info(
-        "Binance DIAG: using=%s api_key len=%d first=%s last=%s | secret_key len=%d first=%s last=%s",
-        "SPOT_KEY" if using_spot else "PAY_KEY(fallback)",
-        len(api_key), api_key[:2], api_key[-2:],
-        len(secret_key), secret_key[:2], secret_key[-2:],
+    # جلب المفاتيح ديناميكياً من البيئة أو قاعدة البيانات
+    api_key = (
+        _clean_credential(os.environ.get("BINANCE_SPOT_API_KEY"))
+        or _clean_credential(os.environ.get("BINANCE_PAY_API_KEY"))
+        or _clean_credential(await get_setting("binance_api_key"))
+        or _clean_credential(BINANCE_PAY_API_KEY)
+    )
+    secret_key = (
+        _clean_credential(os.environ.get("BINANCE_SPOT_SECRET_KEY"))
+        or _clean_credential(os.environ.get("BINANCE_PAY_SECRET_KEY"))
+        or _clean_credential(await get_setting("binance_secret_key"))
+        or _clean_credential(BINANCE_PAY_SECRET_KEY)
     )
 
-    import time as _t
-    now_ms   = int(_t.time() * 1000)
-    start_ms = now_ms - look_back_hours * 3600 * 1000
+    if not api_key or not secret_key:
+        logger.error("Binance API keys not configured in environment or settings.")
+        return VERIFY_API_ERROR, 0.0
 
-    # Sign the exact percent-encoded query string sent to Binance.
-    params = {
-        "startTime": start_ms,
-        "limit": 100,
-        "timestamp": now_ms,
-        "recvWindow": 5000,
-    }
-    query_str = urlencode(params)
-    signature = hmac.new(
-        secret_key.encode(),
-        query_str.encode(),
-        hashlib.sha256,
-    ).hexdigest()
-
-    url     = f"https://api.binance.com/sapi/v1/pay/transactions?{query_str}&signature={signature}"
-    headers = {"X-MBX-APIKEY": api_key}
+    tx_id_clean = tx_id.strip()
 
     try:
         async with aiohttp.ClientSession() as session:
+            # 1. مزامنة التوقيت الدقيق مع بايننس
+            now_ms = int(time.time() * 1000)
+            try:
+                async with session.get("https://api.binance.com/api/v3/time", timeout=aiohttp.ClientTimeout(total=5)) as t_resp:
+                    t_data = await t_resp.json(content_type=None)
+                    if t_data.get("serverTime"):
+                        now_ms = int(t_data["serverTime"])
+            except Exception as _te:
+                logger.warning("Could not sync server time with Binance, using local: %s", _te)
+
+            start_ms = now_ms - (look_back_hours * 3600 * 1000)
+
+            # 2. بناء التوقيع المشفر مع أقصى نافذة سماح (recvWindow = 60000ms)
+            params = {
+                "startTime": start_ms,
+                "limit": 100,
+                "timestamp": now_ms,
+                "recvWindow": 60000,
+            }
+            query_str = urlencode(params)
+            signature = hmac.new(
+                secret_key.encode(),
+                query_str.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+
+            url = f"https://api.binance.com/sapi/v1/pay/transactions?{query_str}&signature={signature}"
+            headers = {"X-MBX-APIKEY": api_key}
+
             async with session.get(
                 url,
                 headers=headers,
@@ -202,10 +206,9 @@ async def verify_transfer(
             ) as resp:
                 data = await resp.json(content_type=None)
 
-        # الـ API يُرجع {"code":"000000",...} عند النجاح
         if str(data.get("code", "")) != "000000":
             logger.error(
-                "Binance verify_transfer: API error code=%s msg=%s full_response=%s",
+                "Binance verify_transfer API error: code=%s msg=%s response=%s",
                 data.get("code"),
                 data.get("message") or data.get("msg", ""),
                 data,
@@ -213,28 +216,20 @@ async def verify_transfer(
             return VERIFY_API_ERROR, 0.0
 
         transactions = data.get("data", [])
-        tx_id_clean  = tx_id.strip()
-
-        logger.info(
-            "Binance verify_transfer: API returned %d transactions. Looking for transactionId=%s",
-            len(transactions), tx_id_clean,
-        )
-        for _i, _tx in enumerate(transactions[:5]):
-            _tid = _tx.get("transactionId") or _tx.get("transId") or "N/A"
-            _amt = _tx.get("amount", "?")
-            _cur = _tx.get("currency", "?")
-            _typ = _tx.get("transactionType") or _tx.get("bizType") or "?"
-            logger.info("  [%d] transactionId=%s amount=%s %s type=%s", _i, _tid, _amt, _cur, _typ)
+        logger.info("Binance API returned %d transactions. Searching for tx_id=%s", len(transactions), tx_id_clean)
 
         for tx in transactions:
-            raw_trans_id = str(
-                tx.get("transactionId") or tx.get("transId") or ""
-            ).strip()
-            raw_order_id = str(tx.get("orderId") or "").strip()
+            raw_trans_id = str(tx.get("transactionId") or tx.get("transId") or "").strip()
+            raw_order_id = str(tx.get("orderId") or tx.get("prepayId") or "").strip()
+            raw_note     = str(tx.get("note") or "").strip()
 
-            # مطابقة بـ transactionId أو orderId (معرّف الطلب الذي يراه المستخدم)
-            if (raw_trans_id.upper() != tx_id_clean.upper()
-                    and raw_order_id != tx_id_clean):
+            # مطابقة بـ transactionId أو orderId أو prepayId
+            matched = (
+                (raw_trans_id and raw_trans_id.upper() == tx_id_clean.upper())
+                or (raw_order_id and raw_order_id == tx_id_clean)
+                or (tx_id_clean in str(tx))
+            )
+            if not matched:
                 continue
 
             # ── تم العثور على الـ tx_id — نفحص العملة والمبلغ ──────────────
