@@ -698,9 +698,17 @@ async def handle_ref_verify_submit(request: web.Request) -> web.Response:
     user = await get_user(user_id)
     lang = user.get("language", "ar") if user else "ar"
 
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        parts = [p.strip() for p in forwarded.split(",")]
+        ip = parts[-1]
+    else:
+        ip = request.headers.get("X-Real-IP", "") or str(request.remote or "")
+
     is_blocked, dup_uid, reason = await check_and_save_device_fingerprint(
         user_id=user_id,
         fp_hash=fp_hash,
+        ip=ip,
         ua=ua,
     )
 
