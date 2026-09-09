@@ -6,7 +6,7 @@ from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
 from config import CAPTCHA_MAX_ATTEMPTS
-from states import CaptchaState
+from states import CaptchaState, UserRefState
 from database import (
     get_user,
     create_user,
@@ -585,8 +585,9 @@ async def show_referral(callback: CallbackQuery, bot: Bot):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     builder.button(text="🔗  مشاركة الرابط عبر تيليجرام" if lang == "ar" else "🔗  Share via Telegram", url=share_url)
+    builder.button(text="✍️  إدخال كود دعوة صديق" if lang == "ar" else "✍️  Enter Invite Code", callback_data="ref:enter_code")
     builder.button(text=t(lang, "btn_back"), callback_data="menu:main")
-    builder.adjust(1)
+    builder.adjust(1, 1, 1)
 
     ref_text = (
         "👥 <b>نظام الإحالة والمكافآت</b> 🎁\n\n"
@@ -613,6 +614,115 @@ async def show_referral(callback: CallbackQuery, bot: Bot):
     )
     await callback.message.edit_text(ref_text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "ref:enter_code")
+async def start_enter_ref_code(callback: CallbackQuery, state: FSMContext):
+    user = await get_user(callback.from_user.id)
+    lang = user.get("language", "ar") if user else "ar"
+
+    user_ref = user.get("referred_by") if user else None
+    dev_ver = user.get("is_device_verified", 0) if user else 0
+
+    if user_ref or dev_ver:
+        await callback.answer(
+            "ℹ️ لقد تم تسجيل وتأكيد حسابك مسبقاً في النظام."
+            if lang == "ar" else
+            "ℹ️ Your account is already verified in the system.",
+            show_alert=True,
+        )
+        return
+
+    await state.set_state(UserRefState.waiting_for_referrer_code)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    b = InlineKeyboardBuilder()
+    b.button(text="❌ إلغاء" if lang == "ar" else "❌ Cancel", callback_data="menu:referral")
+
+    prompt = (
+        "✍️ <b>إدخال كود الدعوة</b> 🎁\n\n"
+        "أرسل كود الدعوة أو آيدي صديقك (مثال: <code>8578796102</code> أو <code>ref_8578796102</code>):"
+    ) if lang == "ar" else (
+        "✍️ <b>Enter Invite Code</b> 🎁\n\n"
+        "Send your friend's invite code or Telegram ID (e.g. <code>8578796102</code>):"
+    )
+    await callback.message.edit_text(prompt, reply_markup=b.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(UserRefState.waiting_for_referrer_code)
+async def process_ref_code_entered(message: Message, state: FSMContext, bot: Bot):
+    text = (message.text or "").strip()
+    if text.startswith("ref_"):
+        text = text[4:]
+    elif "start=ref_" in text:
+        text = text.split("start=ref_")[1].split("&")[0]
+
+    user = await get_user(message.from_user.id)
+    lang = user.get("language", "ar") if user else "ar"
+
+    if not text.isdigit():
+        await message.answer(
+            "⚠️ كود غير صالح. يرجى إرسال رقم آيدي صديقك فقط (مثال: <code>8578796102</code>):"
+            if lang == "ar" else
+            "⚠️ Invalid code. Please send your friend's numeric Telegram ID:"
+        )
+        return
+
+    referrer_id = int(text)
+    if referrer_id == message.from_user.id:
+        await message.answer(
+            "⚠️ لا يمكنك إدخال كود الدعوة الخاص بك!"
+            if lang == "ar" else
+            "⚠️ You cannot enter your own invite code!"
+        )
+        return
+
+    ref_user = await get_user(referrer_id)
+    if not ref_user:
+        await message.answer(
+            "⚠️ لم يتم العثور على هذا المستخدم في النظام."
+            if lang == "ar" else
+            "⚠️ User not found in system."
+        )
+        return
+
+    await state.update_data(pending_referrer_id=referrer_id)
+
+    # تشغيل التحقق الأمني عبر WebApp
+    import os
+    from config import WEBHOOK_BASE_URL
+    from aiogram.types import WebAppInfo
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    raw_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL") or "bottggg2-production.up.railway.app"
+    wh_url = (
+        await get_setting("webhook_base_url")
+        or os.environ.get("WEBHOOK_BASE_URL")
+        or (f"https://{raw_domain}" if raw_domain else "")
+        or "https://bottggg2-production.up.railway.app"
+    ).rstrip("/")
+    if not wh_url.startswith("http"):
+        wh_url = f"https://{wh_url}"
+
+    verify_url = f"{wh_url}/ref-verify"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🛡️  تأكيد أمان جهازي (Web App)" if lang == "ar" else "🛡️  Verify Device (Web App)",
+        web_app=WebAppInfo(url=verify_url),
+    )
+    builder.adjust(1)
+
+    verify_prompt = (
+        "🛡️ <b>التحقق الأمني من الجهاز لمنع الغش</b> 🔒\n\n"
+        f"تم تحديد الداعي بنجاح: <b>{ref_user.get('first_name') or referrer_id}</b> 🎁\n\n"
+        "⚠️ لحماية نظام المكافآت من الحسابات المتعددة، اضغط على الزر أدناه لتأكيد أمان جهازك بنقرة واحدة:"
+    ) if lang == "ar" else (
+        "🛡️ <b>Anti-Fraud Device Verification</b> 🔒\n\n"
+        f"Referrer identified: <b>{ref_user.get('first_name') or referrer_id}</b> 🎁\n\n"
+        "⚠️ Click the button below to verify your device:"
+    )
+    await message.answer(verify_prompt, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 # ── إحصائيات المبيعات السريعة ───────────────────────────────────────────────────

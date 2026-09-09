@@ -20,6 +20,10 @@ class BinanceManualState(StatesGroup):
     waiting_for_hash = State()
 
 
+class UserRefState(StatesGroup):
+    waiting_for_referrer_code = State()
+
+
 class AdminState(StatesGroup):
     waiting_for_unban_id = State()
     waiting_for_user_id_add = State()
