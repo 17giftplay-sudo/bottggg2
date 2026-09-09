@@ -565,16 +565,16 @@ async def show_currency(callback: CallbackQuery):
         "💱 <b>العملات وأسعار الصرف</b> 💵\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "• العملة الأساسية للمتجر: <b>الدولار الأمريكي ($ USD)</b>\n"
-        "• الدفع بالعملات الرقمية: <b>USDT (TRC20 / TON / BEP20)</b>\n"
-        "• العملات الأخرى المدعومة: <b>LTC, TON, BTC, ETH, TRX</b>\n"
-        "• نجوم تيليجرام: <b>Telegram Stars ⭐</b>\n"
+        "• العملة الرقمية المقبولة: <b>USDT فقط (حصراً)</b>\n"
+        "• طرق الدفع المدعومة: <b>Binance Pay / OxaPay / Telegram Stars ⭐</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "💳 <i>يتم تحويل المبالغ تلقائياً بسعر الصرف المباشر عند الشحن.</i>"
+        "⚠️ <b>تنبيه هام:</b> <i>المتجر يقبل التحويل بعملة <b>USDT فقط</b>، ولا نقبل أي عملات رقمية أخرى.</i>"
     ) if lang == "ar" else (
         "💱 <b>Currencies & Exchange Rates</b> 💵\n\n"
         "• Base Currency: <b>$ USD</b>\n"
-        "• Crypto: <b>USDT, LTC, TON, BTC, ETH, TRX</b>\n"
-        "• Telegram Stars: <b>Stars ⭐</b>"
+        "• Accepted Crypto: <b>USDT Only (Strictly)</b>\n"
+        "• Supported Gateways: <b>Binance Pay / OxaPay / Stars ⭐</b>\n\n"
+        "⚠️ <i>Only USDT is accepted in this store.</i>"
     )
     from keyboards import back_to_main_keyboard
     await callback.message.edit_text(curr_text, reply_markup=back_to_main_keyboard(lang), parse_mode="HTML")

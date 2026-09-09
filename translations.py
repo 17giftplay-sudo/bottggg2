@@ -289,16 +289,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         # ── أزرار البحث ───────────────────────────────────────────
         "btn_search":          "🔎  بحث",
 
-        # ── Binance Pay (مراجعة يدوية) ────────────────────────────
-        "btn_binance_manual": "🟡  Binance Pay — USDT (يدوي 👨‍💻)",
-        "btn_binance_pay":    "🟡  Binance Pay — USDT (يدوي 👨‍💻)",
+        # ── Binance Pay (تلقائي فوري) ─────────────────────────────
+        "btn_binance_manual": "🟡  Binance Pay — USDT (تلقائي ⚡)",
+        "btn_binance_pay":    "🟡  Binance Pay — USDT (تلقائي ⚡)",
 
         "topup_binance_ask_amount": (
             f"{_E['money']} <b>إيداع عبر Binance Pay — USDT</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  الحد الأدنى: <b>${{min_usd:.2f}}</b>\n"
-            "💱  العملة المقبولة: <b>USDT فقط</b>\n"
-            "🛡️  التحقق: <b>مراجعة يدوية من الإدارة 👨‍💻</b>\n"
+            "💱  العملة المقبولة: <b>USDT فقط (لا نقبل أي عملة أخرى) ⚠️</b>\n"
+            "⚡  التحقق والشحن: <b>تلقائي وفوري 100% ⚡</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "أدخل المبلغ الذي تريد إيداعه بالدولار $:"
         ),
@@ -306,13 +306,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             f"{_E['money']} <b>معلومات الدفع — Binance Pay</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  المبلغ المطلوب: <b>${{amount:.2f}} USDT</b>\n"
-            "💱  العملة: <b>USDT فقط</b>\n"
+            "💱  العملة: <b>USDT فقط (حصراً) ⚠️</b>\n"
             "🏦  الشبكة: <b>Binance Pay ID</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "🔑 <b>معرّف المحفظة (Pay ID):</b>\n"
             "<code>{uid}</code>\n\n"
-            f"{_E['warning']} <b>أرسل بالضبط ${{amount:.2f}} USDT عبر Binance Pay ID.</b>\n\n"
-            f"بعد الإرسال اضغط {_E['thumbup']} <b>دفعت المبلغ</b> لإرسال الإثبات أو معرّف العملية."
+            f"{_E['warning']} <b>تنبيه هام جداً:</b> أرسل بالضبط ${{amount:.2f}} بعملة <b>USDT فقط</b>.\n\n"
+            f"بعد الإرسال اضغط {_E['thumbup']} <b>✅ تم التحويل</b> ثم أرسل رقم المعاملة للشحن التلقائي فوراً."
         ),
         "topup_binance_enter_amount": (
             f"{_E['money']} <b>أدخل المبلغ الذي أرسلته بالدولار $</b>\n\n"
@@ -606,16 +606,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         # ── Search Button ─────────────────────────────────────────
         "btn_search":          "🔎  Search",
 
-        # ── Binance Pay (Auto-verify) ─────────────────────────────
-        "btn_binance_manual": "🟡  Binance Pay — USDT (Manual)",
-        "btn_binance_pay":    "🟡  Binance Pay — USDT (Manual)",
+        # ── Binance Pay (Instant Auto-verify) ────────────────────
+        "btn_binance_manual": "🟡  Binance Pay — USDT (Instant ⚡)",
+        "btn_binance_pay":    "🟡  Binance Pay — USDT (Instant ⚡)",
 
         "topup_binance_ask_amount": (
             f"{_E['money']} <b>Deposit via Binance Pay — USDT</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{_E['money']}  Minimum: <b>${{min_usd:.2f}}</b>\n"
-            "💱  Accepted currency: <b>USDT only</b>\n"
-            "🛡️  Verification: <b>Manual Admin Review 👨‍💻</b>\n"
+            "💱  Accepted currency: <b>USDT only (Strictly) ⚠️</b>\n"
+            "⚡  Verification: <b>100% Instant & Automatic ⚡</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enter the amount you want to deposit in USD $:"
         ),
