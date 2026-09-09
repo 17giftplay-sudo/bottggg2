@@ -163,8 +163,9 @@ async def verify_transfer(
     )
 
     if not api_key or not secret_key:
-        logger.error("Binance API keys not configured in environment or settings.")
-        return VERIFY_API_ERROR, 0.0
+        err = f"API keys missing in Railway Variables (api_key={bool(api_key)}, secret_key={bool(secret_key)})"
+        logger.error("Binance error: %s", err)
+        return VERIFY_API_ERROR, 0.0, err
 
     tx_id_clean = tx_id.strip()
 
@@ -207,13 +208,12 @@ async def verify_transfer(
                 data = await resp.json(content_type=None)
 
         if str(data.get("code", "")) != "000000":
+            err_msg = f"Binance code {data.get('code')}: {data.get('message') or data.get('msg')}"
             logger.error(
-                "Binance verify_transfer API error: code=%s msg=%s response=%s",
-                data.get("code"),
-                data.get("message") or data.get("msg", ""),
-                data,
+                "Binance verify_transfer API error: %s full_response=%s",
+                err_msg, data,
             )
-            return VERIFY_API_ERROR, 0.0
+            return VERIFY_API_ERROR, 0.0, err_msg
 
         transactions = data.get("data", [])
         logger.info("Binance API returned %d transactions. Searching for tx_id=%s", len(transactions), tx_id_clean)
@@ -247,7 +247,7 @@ async def verify_transfer(
                     "Binance verify_transfer: transId=%s عملة غير مقبولة — currency=%s",
                     tx_id_clean, tx_currency,
                 )
-                return VERIFY_WRONG_CURRENCY, 0.0
+                return VERIFY_WRONG_CURRENCY, 0.0, f"Wrong currency: {tx_currency}"
 
             # نحدد المبلغ الفعلي
             if usdt_fund:
@@ -266,7 +266,7 @@ async def verify_transfer(
                     "Binance verify_transfer: transId=%s مبلغ سالب أو صفر — actual=%.4f",
                     tx_id_clean, actual,
                 )
-                return VERIFY_NOT_FOUND, 0.0
+                return VERIFY_NOT_FOUND, 0.0, "Negative or zero amount"
 
             # ❌ مبلغ أقل من الحد الأدنى
             if actual < MIN_DEPOSIT_USD:
@@ -274,22 +274,22 @@ async def verify_transfer(
                     "Binance verify_transfer: transId=%s مبلغ أقل من الحد الأدنى — actual=%.4f < min=%.2f",
                     tx_id_clean, actual, MIN_DEPOSIT_USD,
                 )
-                return VERIFY_AMOUNT_TOO_LOW, actual
+                return VERIFY_AMOUNT_TOO_LOW, actual, "Amount too low"
 
             # ✅ كل شيء صحيح — نُرجع المبلغ الفعلي (وليس ما كتبه المستخدم)
             logger.info(
                 "Binance verify_transfer: ✅ تم التحقق — transId=%s amount=%.4f USDT",
                 tx_id_clean, actual,
             )
-            return VERIFY_OK, actual
+            return VERIFY_OK, actual, "OK"
 
         logger.warning(
-            "Binance verify_transfer: ❌ لم يُعثر على transId=%s في %d معاملة. "
-            "تأكد أن المستخدم يُرسل transId الصحيح وليس رقم الطلب.",
+            "Binance verify_transfer: ❌ لم يُعثر على transId=%s في %d معاملة.",
             tx_id_clean, len(transactions),
         )
-        return VERIFY_NOT_FOUND, 0.0
+        return VERIFY_NOT_FOUND, 0.0, f"Not found among {len(transactions)} recent transactions"
 
     except Exception as e:
-        logger.error("Binance verify_transfer exception: %s — إرسال للمراجعة اليدوية", e)
-        return VERIFY_API_ERROR, 0.0
+        err = f"Exception: {e}"
+        logger.error("Binance verify_transfer exception: %s", err)
+        return VERIFY_API_ERROR, 0.0, err

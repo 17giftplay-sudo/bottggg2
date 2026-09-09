@@ -517,7 +517,7 @@ async def binance_manual_receive_hash(message: Message, state: FSMContext, bot: 
     await state.clear()
 
     # التحقق التلقائي عبر API بايننس
-    status, actual_amount = await binance_verify_transfer(tx_id)
+    status, actual_amount, err_msg = await binance_verify_transfer(tx_id)
 
     if status == VERIFY_OK:
         order_id = f"BP_{int(datetime.now(timezone.utc).timestamp())}_{message.from_user.id}"
@@ -594,7 +594,7 @@ async def binance_manual_receive_hash(message: Message, state: FSMContext, bot: 
             parse_mode="HTML",
         )
     else:
-        # VERIFY_API_ERROR -> تحويل للمراجعة الاحتياطية
+        # VERIFY_API_ERROR -> تحويل للمراجعة الاحتياطية مع توضيح سبب الخطأ
         try:
             req_amount = amount if amount > 0 else 1.0
             payment_id = await create_manual_payment(message.from_user.id, req_amount, tx_id)
@@ -615,7 +615,8 @@ async def binance_manual_receive_hash(message: Message, state: FSMContext, bot: 
                 f"🆔 <b>الآيدي:</b> <code>{message.from_user.id}</code>\n"
                 f"🔗 <b>اليوزر:</b> {uname}\n\n"
                 f"💵 <b>المبلغ:</b> <b>${req_amount:.2f} USDT</b>\n"
-                f"🔑 <b>المعرّف:</b> <code>{tx_id}</code>\n"
+                f"🔑 <b>المعرّف:</b> <code>{tx_id}</code>\n\n"
+                f"⚠️ <b>سبب عدم الشحن التلقائي:</b> <code>{err_msg}</code>\n"
             )
             from keyboards import admin_binance_review_keyboard
             kb = admin_binance_review_keyboard(payment_id, message.from_user.id)
