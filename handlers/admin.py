@@ -4449,3 +4449,33 @@ async def admin_referral_stats_view(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 
+
+@router.message(Command("reset_user"))
+async def cmd_reset_user(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = (message.text or "").strip().split()
+    if len(parts) < 2 or not parts[1].strip().isdigit():
+        await message.answer("⚠️ الصيغة: <code>/reset_user [آيدي_المستخدم]</code>\nمثال: <code>/reset_user 726886536</code>", parse_mode="HTML")
+        return
+    target_uid = int(parts[1].strip())
+    from database import reset_user_for_testing
+    await reset_user_for_testing(target_uid)
+    await message.answer(
+        f"✅ <b>تم تصفير وحذف بيانات المستخدم <code>{target_uid}</code> وبصمات جهازه بنجاح!</b>\n"
+        "أصبح الحساب الآن جديداً كلياً كأنه لم يدخل البوت من قبل، ويمكنه إعادة تجربة رابط الإحالة بحرية.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("reset_devices"))
+async def cmd_reset_devices(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    from database import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute("DELETE FROM device_fingerprints")
+        await db.execute("UPDATE users SET device_fingerprint = NULL, is_device_verified = 0, referred_by = NULL")
+    await message.answer("✅ <b>تم تصفير جميع بصمات الأجهزة وحالات الإحالة بنجاح لجميع الحسابات!</b>\nيمكنك الآن تجربة أي حساب كما لو كان جديداً.", parse_mode="HTML")
+

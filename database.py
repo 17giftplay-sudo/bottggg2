@@ -506,6 +506,20 @@ async def get_all_user_ids() -> List[int]:
         return [r["user_id"] for r in rows]
 
 
+async def reset_user_for_testing(user_id: int) -> bool:
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as db:
+            await db.execute("DELETE FROM referral_logs WHERE referrer_id = $1 OR referred_id = $1", user_id)
+            await db.execute("DELETE FROM device_fingerprints WHERE user_id = $1", user_id)
+            await db.execute("DELETE FROM users WHERE user_id = $1", user_id)
+        _invalidate_user_cache(user_id)
+        return True
+    except Exception as e:
+        logger.error("reset_user_for_testing error for %s: %s", user_id, e)
+        return False
+
+
 async def create_user(
     user_id: int,
     username: Optional[str],
