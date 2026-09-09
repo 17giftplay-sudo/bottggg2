@@ -811,6 +811,7 @@ def create_app() -> web.Application:
     app.router.add_post("/webhook/cryptomus", handle_cryptomus)
     app.router.add_post("/webhook/binance",   handle_binance)
     app.router.add_post("/oxapay_callback",   handle_oxapay)
+    app.router.add_post("/webhook/oxapay",    handle_oxapay)
     app.router.add_get("/ref-verify",         handle_ref_verify)
     app.router.add_post("/ref-verify/submit", handle_ref_verify_submit)
     app.router.add_get("/health",             handle_health)

@@ -24,6 +24,18 @@ async def create_invoice(amount_usd: float, order_id: str) -> Optional[dict]:
     }
 
     try:
+        import os
+        from database import get_setting
+        raw_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL") or "bottggg2-production.up.railway.app"
+        wh_url = (await get_setting("webhook_base_url") or os.environ.get("WEBHOOK_BASE_URL") or (f"https://{raw_domain}" if raw_domain else "")).rstrip("/")
+        if wh_url:
+            if not wh_url.startswith("http"):
+                wh_url = f"https://{wh_url}"
+            payload["callbackUrl"] = f"{wh_url}/oxapay_callback"
+    except Exception:
+        pass
+
+    try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
