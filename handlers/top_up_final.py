@@ -453,8 +453,15 @@ async def binance_manual_paid_click(callback: CallbackQuery, state: FSMContext):
     lang = user.get("language", "ar") if user else "ar"
 
     await state.set_state(BinanceManualState.waiting_for_hash)
+    prompt = (
+        "✍️ <b>التحقق التلقائي والشحن الفوري</b> ⚡\n\n"
+        "أرسل الآن <b>رقم المعاملة (Order ID / Transaction ID)</b> المكوّن من أرقام والموجود في تفاصيل التحويل في تطبيق Binance ليتم التحقق وشحن رصيدك تلقائياً فوراً:"
+    ) if lang == "ar" else (
+        "✍️ <b>Automatic Verification & Instant Top-Up</b> ⚡\n\n"
+        "Please send your numeric <b>Order ID / Transaction ID</b> from Binance to verify and credit your balance automatically:"
+    )
     await callback.message.edit_text(
-        t(lang, "topup_binance_enter_hash"),
+        prompt,
         reply_markup=back_to_topup_keyboard(lang),
         parse_mode="HTML",
     )
@@ -471,123 +478,154 @@ async def binance_manual_receive_hash(message: Message, state: FSMContext, bot: 
     data = await state.get_data()
     amount = float(data.get("binance_amount", 0))
 
-    if amount <= 0:
-        await state.clear()
-        await message.answer(
-            "⚠️ انتهت صلاحية جلستك، ابدأ من جديد." if lang == "ar"
-            else "⚠️ Your session expired, please start over.",
-            reply_markup=back_to_topup_keyboard(lang),
-        )
-        return
-
-    # استخراج الإثبات (نص أو صورة)
+    # استخراج معرف المعاملة
+    tx_id = ""
     photo_file_id = None
     if message.photo:
         photo_file_id = message.photo[-1].file_id
-        tx_id = message.caption.strip() if message.caption else "صورة إيصال التحويل 📸"
-    elif message.text:
-        tx_id = message.text.strip()
+        tx_id = message.caption.strip() if message.caption else ""
         if not tx_id:
             await message.answer(
-                "❌ يرجى إرسال معرّف المعاملة أو صورة الإيصال." if lang == "ar"
-                else "❌ Please send transaction ID or screenshot.",
+                "⚠️ <b>يرجى إرسال رقم المعاملة كنص (أرقام فقط) للتحقق التلقائي الفوري.</b>\n"
+                "مثال: <code>278391823918</code>" if lang == "ar"
+                else "⚠️ <b>Please send the numeric Transaction ID as text for automatic verification.</b>",
                 reply_markup=back_to_topup_keyboard(lang),
+                parse_mode="HTML",
             )
             return
-    else:
+    elif message.text:
+        tx_id = message.text.strip()
+    
+    if not tx_id:
         await message.answer(
-            "❌ يرجى إرسال صورة أو نص المعرّف." if lang == "ar"
-            else "❌ Please send a screenshot or text transaction ID.",
+            "❌ يرجى إرسال رقم المعاملة (Order ID / Transaction ID)." if lang == "ar"
+            else "❌ Please send transaction ID.",
             reply_markup=back_to_topup_keyboard(lang),
         )
         return
 
-    # فحص منع تكرار المعرف إذا كان نصياً
-    if message.text and await is_tx_id_already_used(tx_id):
+    # فحص منع تكرار المعرف
+    if await is_tx_id_already_used(tx_id):
         await message.answer(
-            "❌ هذا المعرّف استُخدم مسبقاً ولا يمكن تكراره.\nإذا كان لديك مشكلة تواصل مع الدعم." if lang == "ar"
-            else "❌ This transaction ID has already been used.\nContact support if you believe this is an error.",
+            "❌ <b>هذا المعرّف استُخدم مسبقاً ولا يمكن تكراره!</b>\nإذا واجهت أي مشكلة تواصل مع الدعم الفني." if lang == "ar"
+            else "❌ <b>This transaction ID has already been used!</b>\nContact support if you need assistance.",
             reply_markup=back_to_topup_keyboard(lang),
+            parse_mode="HTML",
         )
         return
 
     await state.clear()
 
-    # حفظ طلب الشحن اليدوي في قاعدة البيانات
-    try:
-        payment_id = await create_manual_payment(message.from_user.id, amount, tx_id)
-    except Exception as e:
-        logger.error("Failed to create manual payment in DB: %s", e)
+    # التحقق التلقائي عبر API بايننس
+    status, actual_amount = await binance_verify_transfer(tx_id)
+
+    if status == VERIFY_OK:
+        order_id = f"BP_{int(datetime.now(timezone.utc).timestamp())}_{message.from_user.id}"
+        await create_payment(order_id, message.from_user.id, "Binance Pay", actual_amount, tx_id)
+        await confirm_payment(order_id)
+        user_fresh = await get_user(message.from_user.id)
+        new_bal = float(user_fresh.get("balance", 0) if user_fresh else actual_amount)
+        pts = int(user_fresh.get("points", 0) if user_fresh else 0)
+
+        success_text = (
+            "🎉 <b>تم تأكيد الدفع وإضافة الرصيد تلقائياً!</b> ⚡\n\n"
+            f"💵 <b>المبلغ المشحون:</b> <b>+${actual_amount:.2f} USD</b>\n"
+            f"💰 <b>رصيدك الجديد:</b> <b>${new_bal:.2f} USD</b>\n"
+            f"🔖 <b>معرّف المعاملة:</b> <code>{tx_id}</code>\n\n"
+            "شكراً لثقتك بنا! يمكنك الآن شراء الحسابات والخدمات مباشرة."
+        ) if lang == "ar" else (
+            "🎉 <b>Payment Confirmed & Balance Added Automatically!</b> ⚡\n\n"
+            f"💵 <b>Amount Credited:</b> <b>+${actual_amount:.2f} USD</b>\n"
+            f"💰 <b>New Balance:</b> <b>${new_bal:.2f} USD</b>\n"
+            f"🔖 <b>Transaction ID:</b> <code>{tx_id}</code>"
+        )
+        sell_enabled = (await get_setting("sell_btn_enabled") or "1") == "1"
+        info_enabled = (await get_setting("info_btn_enabled") or "1") == "1"
+        from keyboards import main_menu_keyboard
+        await message.answer(success_text, reply_markup=main_menu_keyboard(lang, sell_enabled=sell_enabled, info_enabled=info_enabled), parse_mode="HTML")
+
+        # إشعار للأدمن بنجاح الشحن التلقائي
+        try:
+            from config import ADMIN_IDS
+            uname = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
+            admin_msg = (
+                "⚡ <b>إيداع تلقائي ناجح عبر Binance Pay!</b>\n\n"
+                f"👤 <b>المستخدم:</b> {uname} (<code>{message.from_user.id}</code>)\n"
+                f"💵 <b>المبلغ:</b> <b>${actual_amount:.2f} USD</b>\n"
+                f"🔖 <b>رقم المعاملة:</b> <code>{tx_id}</code>\n"
+                f"💰 <b>الرصيد الكلي:</b> ${new_bal:.2f}"
+            )
+            for aid in ADMIN_IDS:
+                try:
+                    await bot.send_message(aid, admin_msg, parse_mode="HTML")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return
+
+    elif status == VERIFY_NOT_FOUND:
         await message.answer(
-            "⚠️ حدث خطأ أثناء حفظ الطلب، يرجى التواصل مع الدعم الفني." if lang == "ar"
-            else "⚠️ Error saving request. Please contact support.",
+            "❌ <b>لم يتم العثور على رقم المعاملة في حساب Binance!</b>\n\n"
+            "• تأكد من نسخ <b>Order ID</b> أو <b>Transaction ID</b> الصحيح من تطبيق Binance.\n"
+            "• إذا قمت بالتحويل للتو، انتظر 10-20 ثانية حتى يُسجل التحويل ثم أعد المحاولة.\n"
+            "• إذا استمرت المشكلة، تواصل مع الدعم الفني."
+            if lang == "ar" else
+            "❌ <b>Transaction ID not found in Binance records!</b>\n\n"
+            "Please double check your Order ID / Transaction ID and try again.",
             reply_markup=back_to_topup_keyboard(lang),
+            parse_mode="HTML",
         )
         return
 
-    # إشعار العميل بنجاح إرسال الطلب للمراجعة
-    await message.answer(
-        t(lang, "topup_binance_pending", amount=amount, tx_hash=tx_id),
-        parse_mode="HTML",
-    )
-
-    # إرسال إشعار فوري للأدمن لمراجعة الطلب والموافقة أو الرفض
-    try:
-        from config import ADMIN_IDS
-        from database import get_sub_admins_with_perm
-        from datetime import datetime, timezone
-        from keyboards import admin_binance_review_keyboard
-
-        now_str = datetime.now(timezone.utc).strftime("%d-%m-%Y %H:%M:%S")
-        uname = f"@{message.from_user.username}" if message.from_user.username else "—"
-        review_text = (
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "🟡 <b>طلب شحن Binance Pay (مراجعة يدوية)</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📋 <b>رقم الطلب:</b> #{payment_id}\n"
-            f"👤 <b>المستخدم:</b> <a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>\n"
-            f"🆔 <b>الآيدي:</b> <code>{message.from_user.id}</code>\n"
-            f"🔗 <b>اليوزر:</b> {uname}\n\n"
-            f"💵 <b>المبلغ المطلوب:</b> <b>${amount:.2f} USDT</b>\n"
-            f"🔑 <b>الإثبات / المعرّف:</b> <code>{tx_id}</code>\n\n"
-            f"🗓 <b>التاريخ:</b> {now_str}\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "👇 تحقق من وصول المبلغ في حساب Binance ثم اتخذ الإجراء:"
+    elif status == VERIFY_WRONG_CURRENCY:
+        await message.answer(
+            "❌ <b>العملة المحولة ليست USDT!</b>\n\nيرجى التحويل بعملة USDT فقط.",
+            reply_markup=back_to_topup_keyboard(lang),
+            parse_mode="HTML",
         )
+        return
 
-        kb = admin_binance_review_keyboard(payment_id, message.from_user.id)
-
-        target_admins = list(ADMIN_IDS)
+    elif status == VERIFY_AMOUNT_TOO_LOW:
+        min_usd = float(await get_setting("min_deposit_usd") or "1.0")
+        await message.answer(
+            f"❌ <b>المبلغ أقل من الحد الأدنى (${min_usd:.2f} USD)!</b>",
+            reply_markup=back_to_topup_keyboard(lang),
+            parse_mode="HTML",
+        )
+    else:
+        # VERIFY_API_ERROR -> تحويل للمراجعة الاحتياطية
         try:
-            sub_admins = await get_sub_admins_with_perm("deposits")
-            for sa in sub_admins:
-                if sa["user_id"] not in target_admins:
-                    target_admins.append(sa["user_id"])
-        except Exception:
-            pass
-
-        for adm_id in target_admins:
-            try:
-                if photo_file_id:
-                    await bot.send_photo(
-                        adm_id,
-                        photo=photo_file_id,
-                        caption=review_text,
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                    )
-                else:
-                    await bot.send_message(
-                        adm_id,
-                        review_text,
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                    )
-            except Exception as _e:
-                logger.warning("Could not send Binance review to admin %s: %s", adm_id, _e)
-
-    except Exception as e:
-        logger.error("Failed to notify admins of Binance manual deposit: %s", e)
+            req_amount = amount if amount > 0 else 1.0
+            payment_id = await create_manual_payment(message.from_user.id, req_amount, tx_id)
+            await message.answer(
+                "⏳ <b>تم استلام رقم المعاملة وجاري مراجعته من الإدارة</b>\n\n"
+                "سيتم شحن رصيدك وإشعارك فوراً خلال دقائق.",
+                reply_markup=back_to_topup_keyboard(lang),
+                parse_mode="HTML",
+            )
+            from config import ADMIN_IDS
+            uname = f"@{message.from_user.username}" if message.from_user.username else "—"
+            review_text = (
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "🟡 <b>طلب شحن Binance Pay (مراجعة احتياطية)</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📋 <b>رقم الطلب:</b> #{payment_id}\n"
+                f"👤 <b>المستخدم:</b> <a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>\n"
+                f"🆔 <b>الآيدي:</b> <code>{message.from_user.id}</code>\n"
+                f"🔗 <b>اليوزر:</b> {uname}\n\n"
+                f"💵 <b>المبلغ:</b> <b>${req_amount:.2f} USDT</b>\n"
+                f"🔑 <b>المعرّف:</b> <code>{tx_id}</code>\n"
+            )
+            from keyboards import admin_binance_review_keyboard
+            kb = admin_binance_review_keyboard(payment_id, message.from_user.id)
+            for aid in ADMIN_IDS:
+                try:
+                    await bot.send_message(aid, review_text, parse_mode="HTML", reply_markup=kb)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error("Failed in fallback manual payment: %s", e)
 
 
 # ── استرداد نجوم (Refund) ─────────────────────────────────────────────────────
