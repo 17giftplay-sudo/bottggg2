@@ -62,6 +62,24 @@ def is_admin(user_id: int) -> bool:
 
 
 
+def _clean_channel_id(ch: str) -> str:
+    if not ch:
+        return ""
+    ch = ch.strip()
+    if ch.startswith("https://t.me/joinchat/") or ch.startswith("https://t.me/+"):
+        return ch
+    if ch.startswith("https://t.me/"):
+        ch = ch.replace("https://t.me/", "")
+    elif ch.startswith("http://t.me/"):
+        ch = ch.replace("http://t.me/", "")
+    elif ch.startswith("t.me/"):
+        ch = ch.replace("t.me/", "")
+    ch = ch.strip("/")
+    if ch and not ch.startswith("@") and not ch.startswith("-") and not ch.isdigit():
+        ch = f"@{ch}"
+    return ch
+
+
 # ── ثوابت ودوال مساعدة لكشف الحسابات المميزة ─────────────────────────────────
 _ACCOUNT_EPOCH = 1376438400  # Telegram epoch reference
 # سيمافور يحدد أقصى عدد لمهام تدفئة الحسابات المتزامنة (لتجنب الحمل الزائد)
@@ -216,8 +234,34 @@ async def _check_single_line(
                 **{k: device[k] for k in device},
                 **proxy_kwargs,
             )
-            await asyncio.wait_for(client.start(), timeout=15)
-            await asyncio.wait_for(client.get_me(), timeout=10)
+            try:
+                is_auth = await asyncio.wait_for(client.connect(), timeout=12)
+            except (asyncio.TimeoutError, OSError, ConnectionError):
+                if proxy_kwargs:
+                    try:
+                        if client.is_connected:
+                            await client.disconnect()
+                    except Exception:
+                        pass
+                    client = PyrogramClient(
+                        name=f"chk_direct_{phone.replace('+', '')}",
+                        api_id=api_id,
+                        api_hash=api_hash,
+                        session_string=session_string,
+                        in_memory=True,
+                        no_updates=True,
+                        **{k: device[k] for k in device},
+                    )
+                    is_auth = await asyncio.wait_for(client.connect(), timeout=12)
+                else:
+                    raise
+
+            if not is_auth:
+                return {"status": "invalid", "phone": phone}
+
+            me = await asyncio.wait_for(client.get_me(), timeout=10)
+            if not me:
+                return {"status": "invalid", "phone": phone}
 
             pw_status = None
             return {"status": "valid", "phone": phone, "pw": pw_status}
@@ -236,7 +280,8 @@ async def _check_single_line(
         finally:
             if client is not None:
                 try:
-                    await asyncio.wait_for(client.stop(), timeout=5)
+                    if client.is_connected:
+                        await asyncio.wait_for(client.disconnect(), timeout=4)
                 except Exception:
                     pass
 
@@ -885,8 +930,34 @@ async def _validate_one_account(
                 **{k: device[k] for k in device},
                 **proxy_kwargs,
             )
-            await asyncio.wait_for(client.start(), timeout=_VALIDATE_CONNECT_TIMEOUT)
-            await asyncio.wait_for(client.get_me(), timeout=_VALIDATE_GETME_TIMEOUT)
+            try:
+                is_auth = await asyncio.wait_for(client.connect(), timeout=_VALIDATE_CONNECT_TIMEOUT)
+            except (asyncio.TimeoutError, OSError, ConnectionError):
+                if proxy_kwargs:
+                    try:
+                        if client.is_connected:
+                            await client.disconnect()
+                    except Exception:
+                        pass
+                    client = _ValClient(
+                        name=f"val_direct_{phone.replace('+', '')}_{account_id}",
+                        api_id=parsed["api_id"],
+                        api_hash=parsed["api_hash"],
+                        session_string=parsed["session_string"],
+                        in_memory=True,
+                        no_updates=True,
+                        **{k: device[k] for k in device},
+                    )
+                    is_auth = await asyncio.wait_for(client.connect(), timeout=_VALIDATE_CONNECT_TIMEOUT)
+                else:
+                    raise
+
+            if not is_auth:
+                return "invalid"
+
+            me = await asyncio.wait_for(client.get_me(), timeout=_VALIDATE_GETME_TIMEOUT)
+            if not me:
+                return "invalid"
             return "valid"
 
         except (
@@ -908,7 +979,8 @@ async def _validate_one_account(
         finally:
             if client is not None:
                 try:
-                    await asyncio.wait_for(client.stop(), timeout=5)
+                    if client.is_connected:
+                        await asyncio.wait_for(client.disconnect(), timeout=4)
                 except Exception:
                     pass
 
@@ -973,8 +1045,36 @@ async def _import_check_one(
             )
 
             # ── 1. اتصال + تحقق أساسي ─────────────────────────────────────
-            await asyncio.wait_for(client.start(), timeout=20)
+            try:
+                is_auth = await asyncio.wait_for(client.connect(), timeout=15)
+            except (asyncio.TimeoutError, OSError, ConnectionError):
+                if proxy_kwargs:
+                    try:
+                        if client.is_connected:
+                            await client.disconnect()
+                    except Exception:
+                        pass
+                    client = _ImpClient(
+                        name=f"imp_direct_{parsed['phone'].replace('+', '')}_{account_id}",
+                        api_id=parsed["api_id"],
+                        api_hash=parsed["api_hash"],
+                        session_string=parsed["session_string"],
+                        in_memory=True,
+                        no_updates=True,
+                        **{k: device[k] for k in device},
+                    )
+                    is_auth = await asyncio.wait_for(client.connect(), timeout=15)
+                else:
+                    raise
+
+            if not is_auth:
+                result["status"] = "invalid"
+                return result
+
             me = await asyncio.wait_for(client.get_me(), timeout=10)
+            if not me:
+                result["status"] = "invalid"
+                return result
 
             # ── 2. كشف Premium وسنة الإنشاء ──────────────────────────────
             year       = _estimate_account_year(me.id)
@@ -1040,7 +1140,8 @@ async def _import_check_one(
         finally:
             if client is not None:
                 try:
-                    await asyncio.wait_for(client.stop(), timeout=5)
+                    if client.is_connected:
+                        await asyncio.wait_for(client.disconnect(), timeout=4)
                 except Exception:
                     pass
 
@@ -1688,19 +1789,20 @@ async def _check_single_account(
     """
     يفحص صحة جلسة حساب واحد.
     يُرجع: (account_id, status, phone, is_notable, year, is_premium)
-    - status: "valid" | "frozen"
+    - status: "valid" | "frozen" | "unknown"
     - is_notable: True إذا كان الحساب قديماً (≤2020) أو يحمل Premium
     """
     from pyrogram import Client
     from pyrogram.errors import (
         AuthKeyUnregistered, UserDeactivated, SessionExpired,
-        AuthKeyDuplicated, UserDeactivatedBan,
+        AuthKeyDuplicated, UserDeactivatedBan, AuthKeyInvalid,
     )
     from utils.session_manager import parse_account_data, _random_device
     phone = account_data.split("::")[0].strip() if account_data else "?"
     parsed = parse_account_data(account_data)
     if not parsed:
         return account_id, "frozen", phone, False, 0, False
+
     async with sem:
         client = None
         try:
@@ -1716,43 +1818,60 @@ async def _check_single_account(
                 **{k: device[k] for k in device},
                 **proxy_kwargs,
             )
-            await asyncio.wait_for(client.start(), timeout=15)
+            
+            # اتصال بدون طلب تفاعلي
+            try:
+                is_auth = await asyncio.wait_for(client.connect(), timeout=12)
+            except (asyncio.TimeoutError, OSError, ConnectionError):
+                if proxy_kwargs:
+                    # إعادة محاولة مباشرة بدون بروكسي في حال تعطل البروكسي
+                    try:
+                        if client.is_connected:
+                            await client.disconnect()
+                    except Exception:
+                        pass
+                    client = Client(
+                        name=f"chk_direct_{parsed['phone'].replace('+', '')}_{account_id}",
+                        api_id=parsed["api_id"],
+                        api_hash=parsed["api_hash"],
+                        session_string=parsed["session_string"],
+                        in_memory=True,
+                        no_updates=True,
+                        **{k: device[k] for k in device},
+                    )
+                    is_auth = await asyncio.wait_for(client.connect(), timeout=12)
+                else:
+                    raise
+
+            if not is_auth:
+                return account_id, "frozen", phone, False, 0, False
 
             # ── كشف الحسابات المميزة ────────────────────────────────────────
-            me         = await asyncio.wait_for(client.get_me(), timeout=10)
-            year       = _estimate_account_year(me.id)
+            me = await asyncio.wait_for(client.get_me(), timeout=10)
+            if not me:
+                return account_id, "frozen", phone, False, 0, False
+
+            year = _estimate_account_year(me.id)
             is_premium = bool(getattr(me, "is_premium", False))
             is_notable = (year > 0 and year <= 2020) or is_premium
-
-            if is_notable and bot and admin_id:
-                # أرسل إشعاراً للأدمن عن الحساب المميز + رسالة ترويجية
-                asyncio.create_task(
-                    _notify_and_warm_notable(account_data, me, year, is_premium, bot, admin_id)
-                )
-            else:
-                # حسابات عادية: أرسل الرسالة الترويجية فقط (بدون إشعار أدمن)
-                asyncio.create_task(
-                    _send_promo_to_account(account_data, phone)
-                )
 
             return account_id, "valid", phone, is_notable, year, is_premium
 
         except (AuthKeyUnregistered, UserDeactivated, SessionExpired,
-                AuthKeyDuplicated, UserDeactivatedBan):
+                AuthKeyDuplicated, UserDeactivatedBan, AuthKeyInvalid):
             # أخطاء مميتة — الجلسة منتهية أو محظورة بالفعل
             return account_id, "frozen", phone, False, 0, False
         except asyncio.TimeoutError:
-            # انتهت مهلة الاتصال أو get_me — قد تكون مشكلة شبكة مؤقتة
             logger.warning("Timeout checking account %s (%s)", account_id, phone)
             return account_id, "unknown", phone, False, 0, False
         except Exception as e:
-            # خطأ غير متوقع — نعاملها كغير محددة لتجنب حذف حسابات سليمة
             logger.warning("Unexpected error checking account %s (%s): %s", account_id, phone, e)
             return account_id, "unknown", phone, False, 0, False
         finally:
             if client is not None:
                 try:
-                    await asyncio.wait_for(client.stop(), timeout=5)
+                    if client.is_connected:
+                        await asyncio.wait_for(client.disconnect(), timeout=4)
                 except Exception:
                     pass
 
@@ -3012,14 +3131,27 @@ async def admin_force_sub_received(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     val = message.text.strip()
-    if val == "0":
+    if val in ("0", "none", "None", "تعطيل"):
         val = ""
+    else:
+        val = _clean_channel_id(val)
+
     await state.clear()
     await set_setting("force_sub_channel", val)
+
+    status_extra = ""
+    if val and not val.startswith("https://t.me/+"):
+        try:
+            target_id = int(val) if (val.startswith("-") or val.isdigit()) else val
+            chat = await message.bot.get_chat(target_id)
+            status_extra = f"\n📢 تم التحقق من القناة: <b>{chat.title}</b>"
+        except Exception as e:
+            status_extra = f"\n⚠️ <i>تنبيه: تأكد من رفع البوت مشرفاً (Admin) في القناة ليتمكن من التحقق من المشتركين ({e}).</i>"
+
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 الروابط", callback_data="admin:links")
     await message.answer(
-        f"✅ قناة الاشتراك الإجباري: <code>{val or 'معطّل'}</code>",
+        f"✅ قناة الاشتراك الإجباري: <code>{val or 'معطّل'}</code>{status_extra}",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -3124,14 +3256,27 @@ async def admin_notif_channel_received(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     val = message.text.strip()
-    if val == "0":
+    if val in ("0", "none", "None", "تعطيل"):
         val = ""
+    else:
+        val = _clean_channel_id(val)
+
     await state.clear()
     await set_setting("notification_channel", val)
+
+    status_extra = ""
+    if val and not val.startswith("https://t.me/+"):
+        try:
+            target_id = int(val) if (val.startswith("-") or val.isdigit()) else val
+            chat = await message.bot.get_chat(target_id)
+            status_extra = f"\n📣 تم التحقق من القناة: <b>{chat.title}</b>"
+        except Exception as e:
+            status_extra = f"\n⚠️ <i>تنبيه: تأكد من رفع البوت مشرفاً (Admin) في القناة مع صلاحية نشر الرسائل ({e}).</i>"
+
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 الروابط", callback_data="admin:links")
     await message.answer(
-        f"✅ قناة الإشعارات: <code>{val or 'معطّلة'}</code>",
+        f"✅ قناة الإشعارات: <code>{val or 'معطّلة'}</code>{status_extra}",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

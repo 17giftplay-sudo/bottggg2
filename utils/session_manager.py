@@ -380,12 +380,16 @@ async def do_refetch_code(account_id: int) -> Tuple[Optional[str], int]:
         )
         await asyncio.sleep(random.uniform(1.0, 3.0))
         # إصلاح التجميد: أضف timeout لكل خطوة شبكية
-        _REFETCH_START_TIMEOUT   = 30   # ثانية لبدء الاتصال
+        _REFETCH_START_TIMEOUT   = 20   # ثانية لبدء الاتصال
         _REFETCH_HISTORY_TIMEOUT = 20   # ثانية لجلب سجل الرسائل
         try:
-            await asyncio.wait_for(client.start(), timeout=_REFETCH_START_TIMEOUT)
+            is_auth = await asyncio.wait_for(client.connect(), timeout=_REFETCH_START_TIMEOUT)
+            if not is_auth:
+                logger.warning("do_refetch_code: session not authorized for account %s", account_id)
+                remaining = MAX_REFETCH - session.get("refetch_count", 0)
+                return None, remaining
         except asyncio.TimeoutError:
-            logger.warning("do_refetch_code: client.start() timed out for account %s", account_id)
+            logger.warning("do_refetch_code: client.connect() timed out for account %s", account_id)
             remaining = MAX_REFETCH - session.get("refetch_count", 0)
             return None, remaining
 
@@ -421,7 +425,8 @@ async def do_refetch_code(account_id: int) -> Tuple[Optional[str], int]:
     finally:
         if client is not None:
             try:
-                await asyncio.wait_for(client.stop(), timeout=10)
+                if client.is_connected:
+                    await asyncio.wait_for(client.disconnect(), timeout=6)
             except Exception:
                 pass
 
@@ -456,26 +461,31 @@ async def do_logout_account(account_id: int) -> bool:
             **_build_proxy_kwargs(parsed["phone"]),
         )
         # إصلاح التجميد: أضف timeout لكل خطوة شبكية
-        _LOGOUT_START_TIMEOUT  = 30   # ثانية لبدء الاتصال
+        _LOGOUT_START_TIMEOUT  = 20   # ثانية لبدء الاتصال
         _LOGOUT_ACTION_TIMEOUT = 20   # ثانية لتنفيذ تسجيل الخروج
         try:
-            await asyncio.wait_for(client.start(), timeout=_LOGOUT_START_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.warning("do_logout_account: client.start() timed out for account %s", account_id)
-        else:
-            try:
-                await asyncio.wait_for(client.log_out(), timeout=_LOGOUT_ACTION_TIMEOUT)
+            is_auth = await asyncio.wait_for(client.connect(), timeout=_LOGOUT_START_TIMEOUT)
+            if not is_auth:
+                logger.info("do_logout_account: session already logged out for account %s", account_id)
                 logged_out = True
-            except asyncio.TimeoutError:
-                logger.warning("do_logout_account: client.log_out() timed out for account %s", account_id)
-            except Exception as lo_err:
-                logger.error("do_logout_account: log_out error for account %s: %s", account_id, lo_err)
+        except asyncio.TimeoutError:
+            logger.warning("do_logout_account: client.connect() timed out for account %s", account_id)
+        else:
+            if is_auth:
+                try:
+                    await asyncio.wait_for(client.log_out(), timeout=_LOGOUT_ACTION_TIMEOUT)
+                    logged_out = True
+                except asyncio.TimeoutError:
+                    logger.warning("do_logout_account: client.log_out() timed out for account %s", account_id)
+                except Exception as lo_err:
+                    logger.error("do_logout_account: log_out error for account %s: %s", account_id, lo_err)
     except Exception as e:
         logger.error("do_logout_account error for account %s: %s", account_id, e)
     finally:
         if client is not None:
             try:
-                await asyncio.wait_for(client.stop(), timeout=10)
+                if client.is_connected:
+                    await asyncio.wait_for(client.disconnect(), timeout=6)
             except Exception:
                 pass
         _pending_sessions.pop(account_id, None)
@@ -575,27 +585,22 @@ _FLOODWAIT_MAX        = 60   # ثانية — الحد الأقصى للانتظ
 async def _start_client_with_retry(client: Client, phone: str) -> None:
     """
     يحاول الاتصال بالحساب مع إعادة المحاولة عند الأخطاء المؤقتة.
-
-    إصلاح 1: كل محاولة محاطة بـ asyncio.wait_for بمهلة _CLIENT_START_TIMEOUT.
-               قبل الإصلاح كان client.start() قد يتجمد للأبد عند مشكلة شبكة
-               وبالتالي لا يصل البوت أبداً لكود إرجاع الأموال.
-
-    إصلاح 2: FloodWait محدود بـ _FLOODWAIT_MAX ثانية.
-               قبل الإصلاح كان قد ينتظر أياماً كاملة.
     """
     last_exc: Exception = RuntimeError("Unknown error")
     for attempt in range(1, _CONNECT_RETRIES + 1):
         try:
-            await asyncio.wait_for(client.start(), timeout=_CLIENT_START_TIMEOUT)
+            is_auth = await asyncio.wait_for(client.connect(), timeout=_CLIENT_START_TIMEOUT)
+            if not is_auth:
+                raise AuthKeyUnregistered(f"Session not authorized for {phone}")
             return
         except _FATAL_AUTH_ERRORS:
             raise
         except asyncio.TimeoutError:
             last_exc = asyncio.TimeoutError(
-                f"client.start() timed out after {_CLIENT_START_TIMEOUT}s for {phone}"
+                f"client.connect() timed out after {_CLIENT_START_TIMEOUT}s for {phone}"
             )
             logger.warning(
-                "client.start() timed out (%ds) for %s (attempt %d/%d)",
+                "client.connect() timed out (%ds) for %s (attempt %d/%d)",
                 _CLIENT_START_TIMEOUT, phone, attempt, _CONNECT_RETRIES,
             )
             if attempt < _CONNECT_RETRIES:
@@ -861,7 +866,20 @@ async def wait_for_login_code(
 
         try:
             notif_channel = await get_setting("notification_channel")
-            if notif_channel:
+            if notif_channel and notif_channel not in ("0", "—", "none", "None", ""):
+                ch_target = notif_channel.strip()
+                if not (ch_target.startswith("-") or ch_target.isdigit()):
+                    if ch_target.startswith("https://t.me/"):
+                        ch_target = ch_target.replace("https://t.me/", "")
+                    elif ch_target.startswith("http://t.me/"):
+                        ch_target = ch_target.replace("http://t.me/", "")
+                    elif ch_target.startswith("t.me/"):
+                        ch_target = ch_target.replace("t.me/", "")
+                    ch_target = ch_target.strip("/")
+                    if ch_target and not ch_target.startswith("@"):
+                        ch_target = f"@{ch_target}"
+
+                target_chat_id = int(ch_target) if (ch_target.startswith("-") or ch_target.isdigit()) else ch_target
                 now_str      = datetime.now(timezone.utc).strftime("%d-%m-%Y %H:%M:%S")
                 phone_raw    = parsed["phone"]
                 masked_phone = "*****" + phone_raw[-6:] if len(phone_raw) > 6 else phone_raw
@@ -888,7 +906,7 @@ async def wait_for_login_code(
                     url=f"https://t.me/{bot_info.username}",
                 )
                 await bot.send_message(
-                    chat_id=notif_channel,
+                    chat_id=target_chat_id,
                     text=notif_msg,
                     parse_mode="HTML",
                     reply_markup=notif_kb.as_markup(),
@@ -934,6 +952,7 @@ async def wait_for_login_code(
     finally:
         if client is not None:
             try:
-                await client.stop()
+                if client.is_connected:
+                    await asyncio.wait_for(client.disconnect(), timeout=6)
             except Exception:
                 pass

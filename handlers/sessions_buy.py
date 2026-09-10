@@ -542,7 +542,20 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
     # ── إشعار قناة الإشعارات ─────────────────────────────────────────────────
     try:
         notif_channel = await get_setting("notification_channel")
-        if notif_channel:
+        if notif_channel and notif_channel not in ("0", "—", "none", "None", ""):
+            ch_target = notif_channel.strip()
+            if not (ch_target.startswith("-") or ch_target.isdigit()):
+                if ch_target.startswith("https://t.me/"):
+                    ch_target = ch_target.replace("https://t.me/", "")
+                elif ch_target.startswith("http://t.me/"):
+                    ch_target = ch_target.replace("http://t.me/", "")
+                elif ch_target.startswith("t.me/"):
+                    ch_target = ch_target.replace("t.me/", "")
+                ch_target = ch_target.strip("/")
+                if ch_target and not ch_target.startswith("@"):
+                    ch_target = f"@{ch_target}"
+
+            target_chat_id = int(ch_target) if (ch_target.startswith("-") or ch_target.isdigit()) else ch_target
             uid_str      = str(callback.from_user.id)
             masked_buyer = "*****" + uid_str[-4:]
             now_s        = datetime.now(timezone.utc).strftime("%d-%m-%Y %H:%M:%S")
@@ -563,7 +576,7 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
             ch_kb = _KB()
             ch_kb.button(text="🔗  ـ  رابط البوت  ـ  🔗", url=f"https://t.me/{bot_info.username}")
             await bot.send_message(
-                chat_id=notif_channel,
+                chat_id=target_chat_id,
                 text=ch_msg,
                 parse_mode="HTML",
                 reply_markup=ch_kb.as_markup(),

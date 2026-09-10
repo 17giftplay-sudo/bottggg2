@@ -60,15 +60,12 @@ def _clean_channel_id(ch: str) -> str:
     return ch
 
 
-async def _check_force_sub(bot: Bot, user_id: int) -> bool:
-    ch1 = await get_setting("force_sub_channel")
-    if not ch1 or ch1 in ("0", "—", "none", "None", ""):
+async def _check_single_channel_membership(bot: Bot, ch_raw: str, user_id: int) -> bool:
+    if not ch_raw or ch_raw in ("0", "—", "none", "None", ""):
         return True
-
-    ch = _clean_channel_id(ch1)
-    if not ch:
+    ch = _clean_channel_id(ch_raw)
+    if not ch or ch.startswith("https://t.me/joinchat/") or ch.startswith("https://t.me/+"):
         return True
-
     try:
         target_id = int(ch) if (ch.startswith("-") or ch.isdigit()) else ch
         member = await bot.get_chat_member(chat_id=target_id, user_id=user_id)
@@ -76,8 +73,25 @@ async def _check_force_sub(bot: Bot, user_id: int) -> bool:
             return False
         return True
     except Exception as e:
-        logger.warning("_check_force_sub: failed to check %s (target: %s) for user %s: %s", ch1, ch, user_id, e)
-        return False
+        logger.warning("_check_force_sub: failed to check %s (target: %s) for user %s: %s", ch_raw, ch, user_id, e)
+        return True
+
+
+async def _check_force_sub(bot: Bot, user_id: int) -> bool:
+    ch1 = await get_setting("force_sub_channel")
+    ch2 = await get_setting("notification_channel")
+
+    if ch1 and ch1 not in ("0", "—", "none", "None", ""):
+        ok1 = await _check_single_channel_membership(bot, ch1, user_id)
+        if not ok1:
+            return False
+
+    if ch2 and ch2 not in ("0", "—", "none", "None", "") and ch2 != ch1:
+        ok2 = await _check_single_channel_membership(bot, ch2, user_id)
+        if not ok2:
+            return False
+
+    return True
 
 
 def _welcome_text(lang: str, user: dict) -> str:
