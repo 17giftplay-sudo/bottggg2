@@ -30,8 +30,11 @@ from database import (
     set_account_status, get_accounts_for_maintenance_view,
     get_all_countries_with_stock_or_maintenance,
     update_account_data_by_old, update_account_data_by_id, get_account_status_and_data,
+    get_recent_sales, search_sales, get_user_audit_details,
+    unban_user, zero_user_balance, reset_user_for_testing,
 )
 from config import ADMIN_IDS
+
 from states import AdminState
 from keyboards import (
     admin_main_keyboard, admin_users_keyboard, admin_stock_keyboard,
@@ -4676,4 +4679,323 @@ async def cmd_reset_devices(message: Message):
         await db.execute("DELETE FROM device_fingerprints")
         await db.execute("UPDATE users SET device_fingerprint = NULL, is_device_verified = 0, referred_by = NULL")
     await message.answer("✅ <b>تم تصفير جميع بصمات الأجهزة وحالات الإحالة بنجاح لجميع الحسابات!</b>\nيمكنك الآن تجربة أي حساب كما لو كان جديداً.", parse_mode="HTML")
+
+
+# ─── تدقيق المبيعات والتحقيق الأمني ─────────────────────────────
+
+async def _format_and_send_recent_sales(event):
+    sales = await get_recent_sales(limit=10)
+    builder = InlineKeyboardBuilder()
+    if not sales:
+        text = "📭 <b>لا توجد مبيعات مسجلة في النظام بعد.</b>"
+    else:
+        text = "🕵️ <b>كشف آخر 10 عمليات بيع (معرفات كاملة):</b>\n━━━━━━━━━━━━━━━━━━━━━\n"
+        for idx, s in enumerate(sales, 1):
+            country = s.get("country_name") or "دولة غير محددة"
+            price = float(s.get("price") or 0.0)
+            buyer_id = s.get("sold_to_user_id")
+            raw_data = s.get("account_data") or ""
+            phone = raw_data.split(":")[0].strip() if ":" in raw_data else raw_data[:15]
+            buyer_name = s.get("first_name") or "بدون اسم"
+            username = f"@{s.get('username')}" if s.get("username") else "بدون يوزر"
+            sold_at = s.get("sold_at")
+            sold_time_str = sold_at.strftime("%Y-%m-%d %H:%M") if sold_at else "غير محدد"
+
+            text += (
+                f"<b>{idx}. {country}</b>\n"
+                f"📱 الرقم: <code>{phone}</code>\n"
+                f"💵 السعر: ${price:.2f} | 📅 {sold_time_str}\n"
+                f"👤 المشتري: <b>{buyer_name}</b> ({username})\n"
+                f"🆔 الآيدي: <code>{buyer_id}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+            if buyer_id:
+                builder.button(
+                    text=f"🔍 كشف المشتري ({buyer_id})",
+                    callback_data=f"admin:audit_user:{buyer_id}"
+                )
+
+    builder.button(text="🔎 بحث بالرقم أو الآيدي", callback_data="admin:search_sales")
+    builder.button(text="🔙 إدارة المستخدمين", callback_data="admin:users")
+    builder.adjust(1)
+
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+async def _format_and_send_sales_search(event, query: str):
+    sales = await search_sales(query, limit=15)
+    builder = InlineKeyboardBuilder()
+
+    user_direct = None
+    if query.isdigit():
+        try:
+            user_direct = await get_user(int(query))
+        except Exception:
+            pass
+
+    if not sales and not user_direct:
+        text = (
+            f"❌ <b>لم يتم العثور على أي نتائج تطابق:</b> <code>{query}</code>\n\n"
+            "تأكد من كتابة جزء من رقم الهاتف (مثل: 664121) أو آيدي المستخدم."
+        )
+        builder.button(text="🔎 بحث جديد", callback_data="admin:search_sales")
+        builder.button(text="🔙 رجوع", callback_data="admin:recent_sales")
+        builder.adjust(1)
+    else:
+        text = f"🔎 <b>نتائج البحث عن:</b> <code>{query}</code>\n━━━━━━━━━━━━━━━━━━━━━\n"
+        seen_users = set()
+        if sales:
+            text += f"📊 عُثر على {len(sales)} عملية بيع مطابقة:\n\n"
+            for idx, s in enumerate(sales, 1):
+                country = s.get("country_name") or "دولة"
+                price = float(s.get("price") or 0.0)
+                buyer_id = s.get("sold_to_user_id")
+                raw_data = s.get("account_data") or ""
+                phone = raw_data.split(":")[0].strip() if ":" in raw_data else raw_data[:15]
+                buyer_name = s.get("first_name") or "بدون اسم"
+                username = f"@{s.get('username')}" if s.get("username") else "بدون يوزر"
+                sold_at = s.get("sold_at")
+                sold_time_str = sold_at.strftime("%Y-%m-%d %H:%M") if sold_at else "غير محدد"
+
+                text += (
+                    f"<b>{idx}. {country}</b>\n"
+                    f"📱 الرقم: <code>{phone}</code> | 💵 ${price:.2f}\n"
+                    f"👤 المشتري: <b>{buyer_name}</b> ({username})\n"
+                    f"🆔 الآيدي: <code>{buyer_id}</code> | 📅 {sold_time_str}\n\n"
+                )
+                if buyer_id and buyer_id not in seen_users:
+                    seen_users.add(buyer_id)
+                    builder.button(
+                        text=f"🕵️ تدقيق المشتري ({buyer_id})",
+                        callback_data=f"admin:audit_user:{buyer_id}"
+                    )
+        if user_direct and user_direct["user_id"] not in seen_users:
+            uid = user_direct["user_id"]
+            text += f"👤 تم العثور أيضاً على حساب مستخدم بالآيدي <code>{uid}</code> مباشرة.\n"
+            builder.button(
+                text=f"🕵️ تدقيق المستخدم ({uid})",
+                callback_data=f"admin:audit_user:{uid}"
+            )
+
+        builder.button(text="🔎 بحث آخر", callback_data="admin:search_sales")
+        builder.button(text="🔙 إدارة المستخدمين", callback_data="admin:users")
+        builder.adjust(1)
+
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+async def _format_and_send_user_audit(event, user_id: int):
+    details = await get_user_audit_details(user_id)
+    if not details or not details.get("user"):
+        msg = f"❌ لم يتم العثور على مستخدم بالآيدي <code>{user_id}</code> في قاعدة البيانات."
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔙 رجوع", callback_data="admin:recent_sales")
+        if isinstance(event, CallbackQuery):
+            await event.message.edit_text(msg, reply_markup=builder.as_markup(), parse_mode="HTML")
+        else:
+            await event.answer(msg, reply_markup=builder.as_markup(), parse_mode="HTML")
+        return
+
+    u = details["user"]
+    first_name = u.get("first_name") or "بدون اسم"
+    username = f"@{u.get('username')}" if u.get("username") else "بدون يوزر"
+    balance = float(u.get("balance") or 0.0)
+    points = int(u.get("points") or 0)
+    is_banned = bool(u.get("is_banned"))
+    ban_reason = u.get("ban_reason") or "غير محدد"
+    joined_at = u.get("joined_at")
+    joined_str = joined_at.strftime("%Y-%m-%d %H:%M") if joined_at else "غير مسجل"
+
+    deposits_sum = details.get("deposits_sum", 0.0)
+    ref_earned = details.get("ref_earned", 0.0)
+    ref_count = details.get("ref_count", 0)
+    fraud_count = details.get("fraud_count", 0)
+    referrer = details.get("referrer")
+
+    if referrer:
+        ref_id = referrer.get("user_id")
+        ref_uname = f"@{referrer.get('username')}" if referrer.get("username") else ""
+        referrer_text = f"<code>{ref_id}</code> {ref_uname}"
+    else:
+        referrer_text = "لا يوجد (سجل مباشرة بدون كود إحالة)"
+
+    purchases_count = details.get("purchases_count", 0)
+    purchases_sum = details.get("purchases_sum", 0.0)
+    recent_purchases = details.get("recent_purchases", [])
+    recent_refs = details.get("recent_refs", [])
+
+    text = (
+        f"🕵️ <b>ملف التحقيق والتدقيق الأمني:</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 الاسم: <b>{first_name}</b>\n"
+        f"🔗 المعرف: {username}\n"
+        f"🆔 الآيدي: <code>{user_id}</code>\n"
+        f"📅 تاريخ التسجيل: {joined_str}\n"
+        f"🚫 حالة الحساب: {'⛔ <b>محظور</b> (' + ban_reason + ')' if is_banned else '✅ <b>نشط</b>'}\n"
+        f"💰 الرصيد الحالي: <b>${balance:.2f}</b> | 🪙 {points} نقطة\n\n"
+        f"💳 <b>سجل الأموال والإيداعات:</b>\n"
+        f"• إجمالي الشحن الحقيقي: <b>${deposits_sum:.2f}</b>\n"
+        f"• أرباح الإحالات المكتسبة: <b>${ref_earned:.2f}</b> ({ref_count} إحالة ناجحة)\n"
+        f"• محاولات إحالة وهمية تم صدها: <b>{fraud_count}</b>\n"
+        f"• الداعي (من أحضره): {referrer_text}\n\n"
+        f"🛒 <b>سجل المشتريات:</b>\n"
+        f"• إجمالي الشراء: <b>{purchases_count}</b> حساب بقيمة <b>${purchases_sum:.2f}</b>\n"
+    )
+
+    if recent_purchases:
+        text += "\n📋 <i>آخر الحسابات المشتراة:</i>\n"
+        for p in recent_purchases:
+            p_country = p.get("country_name") or "دولة"
+            p_price = float(p.get("price") or 0.0)
+            raw = p.get("account_data") or ""
+            p_phone = raw.split(":")[0].strip() if ":" in raw else raw[:15]
+            p_sold_at = p.get("sold_at")
+            p_time = p_sold_at.strftime("%m-%d %H:%M") if p_sold_at else ""
+            text += f" - {p_country} (<code>{p_phone}</code>) بـ ${p_price:.2f} [{p_time}]\n"
+
+    if recent_refs:
+        text += "\n👥 <i>سجل آخر الإحالات التي جلبها:</i>\n"
+        for r in recent_refs:
+            r_uid = r.get("referred_id")
+            r_status = r.get("status")
+            r_status_icon = "✅" if r_status == "approved" else "⛔ مرفوض"
+            r_uname = f"@{r.get('username')}" if r.get("username") else f"<code>{r_uid}</code>"
+            text += f" - {r_uname}: {r_status_icon} (+${float(r.get('reward_usd') or 0):.2f})\n"
+
+    builder = InlineKeyboardBuilder()
+    if is_banned:
+        builder.button(text="🟢 فك حظر المستخدم", callback_data=f"admin:unban_user:{user_id}")
+    else:
+        builder.button(text="🚫 حظر المستخدم فوراً", callback_data=f"admin:ban_user:{user_id}")
+
+    builder.button(text="🧹 تصفير الرصيد ($0)", callback_data=f"admin:zero_balance:{user_id}")
+    builder.button(text="🔄 تصفير وحذف كحساب تجريبي", callback_data=f"admin:reset_user_confirm:{user_id}")
+    builder.button(text="🔙 رجوع لآخر المبيعات", callback_data="admin:recent_sales")
+    builder.button(text="🔙 إدارة المستخدمين", callback_data="admin:users")
+    builder.adjust(1, 1, 1, 2)
+
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.message(Command("audit"))
+async def cmd_audit(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = (message.text or "").strip().split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        await _format_and_send_sales_search(message, parts[1].strip())
+    else:
+        await _format_and_send_recent_sales(message)
+
+
+@router.callback_query(F.data == "admin:recent_sales")
+async def cb_admin_recent_sales(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    await _format_and_send_recent_sales(callback)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:search_sales")
+async def cb_admin_search_sales(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    await state.set_state(AdminState.waiting_for_sales_search)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 إلغاء والرجوع", callback_data="admin:users")
+    await callback.message.edit_text(
+        "🔎 <b>البحث في المبيعات والمستخدمين</b>\n\n"
+        "أرسل الآن أي من البيانات التالية:\n"
+        "• آخر أرقام من الهاتف (مثل: <code>664121</code>)\n"
+        "• آيدي المستخدم كاملاً أو آخره (مثل: <code>34963</code>)\n"
+        "• اسم المستخدم (اليوزر @)\n"
+        "• اسم الدولة (مثل: <code>كندا</code>)",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AdminState.waiting_for_sales_search)
+async def process_sales_search(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    query = (message.text or "").strip()
+    if not query:
+        await message.answer("⚠️ يرجى إدخال نص للبحث.")
+        return
+    await _format_and_send_sales_search(message, query)
+
+
+@router.callback_query(F.data.startswith("admin:audit_user:"))
+async def cb_admin_audit_user(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    uid = int(callback.data.split(":")[-1])
+    await _format_and_send_user_audit(callback, uid)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:ban_user:"))
+async def cb_admin_ban_user(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    uid = int(callback.data.split(":")[-1])
+    await set_user_banned(uid, True, "Security Audit Ban")
+    await callback.answer("🚫 تم حظر المستخدم بنجاح!", show_alert=True)
+    await _format_and_send_user_audit(callback, uid)
+
+
+@router.callback_query(F.data.startswith("admin:unban_user:"))
+async def cb_admin_unban_user(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    uid = int(callback.data.split(":")[-1])
+    await unban_user(uid)
+    await callback.answer("🟢 تم فك حظر المستخدم بنجاح!", show_alert=True)
+    await _format_and_send_user_audit(callback, uid)
+
+
+@router.callback_query(F.data.startswith("admin:zero_balance:"))
+async def cb_admin_zero_balance(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    uid = int(callback.data.split(":")[-1])
+    await zero_user_balance(uid)
+    await callback.answer("🧹 تم تصفير رصيد ونقاط المستخدم بالكامل!", show_alert=True)
+    await _format_and_send_user_audit(callback, uid)
+
+
+@router.callback_query(F.data.startswith("admin:reset_user_confirm:"))
+async def cb_admin_reset_user_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("غير مصرح", show_alert=True)
+        return
+    uid = int(callback.data.split(":")[-1])
+    await reset_user_for_testing(uid)
+    await callback.answer("🔄 تم تصفير وحذف حساب المستخدم وبصماته بالكامل!", show_alert=True)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 إدارة المستخدمين", callback_data="admin:users")
+    await callback.message.edit_text(
+        f"✅ <b>تم تصفير وحذف المستخدم <code>{uid}</code> بالكامل كأنه لم يدخل البوت من قبل!</b>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+
 

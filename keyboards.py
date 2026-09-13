@@ -262,12 +262,14 @@ def admin_referral_settings_keyboard(ref_enabled: bool = True, reward_usd: float
 
 def admin_users_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔍  عرض مستخدم",   callback_data="admin:view_user")
-    builder.button(text="➕  إضافة رصيد",    callback_data="admin:add_balance")
-    builder.button(text="➖  خصم رصيد",      callback_data="admin:deduct_balance")
-    builder.button(text="🪙  إضافة نقاط",   callback_data="admin:add_points")
-    builder.button(text="🔙  رجوع",          callback_data="admin:main")
-    builder.adjust(1, 2, 1, 1)
+    builder.button(text="🔍  عرض مستخدم",            callback_data="admin:view_user")
+    builder.button(text="🕵️  كشف آخر المبيعات",      callback_data="admin:recent_sales")
+    builder.button(text="🔎  بحث بالرقم أو الآيدي",   callback_data="admin:search_sales")
+    builder.button(text="➕  إضافة رصيد",             callback_data="admin:add_balance")
+    builder.button(text="➖  خصم رصيد",               callback_data="admin:deduct_balance")
+    builder.button(text="🪙  إضافة نقاط",            callback_data="admin:add_points")
+    builder.button(text="🔙  رجوع",                   callback_data="admin:main")
+    builder.adjust(1, 2, 2, 1, 1)
     return builder.as_markup()
 
 

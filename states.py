@@ -75,6 +75,7 @@ class AdminState(StatesGroup):
     waiting_for_stock_2fa_password   = State()
     waiting_for_stock_2fa_fallback   = State()
     waiting_for_user_id              = State()
+    waiting_for_sales_search         = State()
 
 
 class SubAdminState(StatesGroup):

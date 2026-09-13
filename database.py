@@ -618,6 +618,19 @@ async def unban_user(user_id: int):
     _invalidate_user_cache(user_id)
 
 
+async def zero_user_balance(user_id: int):
+    """تصفير رصيد ونقاط المستخدم بالكامل وحفظ حركة في المعاملات."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute("UPDATE users SET balance = 0.0, points = 0 WHERE user_id = $1", user_id)
+        await db.execute(
+            "INSERT INTO transactions (user_id, type, amount, description) VALUES ($1, 'admin_deduct', 0, 'Admin zeroed balance')",
+            user_id,
+        )
+    _invalidate_user_cache(user_id)
+
+
+
 async def get_banned_users() -> List[Dict[str, Any]]:
     """يسترجع جميع المستخدمين المحظورين حالياً."""
     pool = await get_pool()
@@ -2383,6 +2396,139 @@ async def get_user_referral_stats(user_id: int) -> Dict[str, Any]:
         }
 
 
+async def get_recent_sales(limit: int = 10) -> list[dict]:
+    """يجلب آخر المبيعات مع بيانات المشتري غير المشفرة للأدمن."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        rows = await db.fetch(
+            """
+            SELECT ai.id, ai.country_code, ai.country_name, ai.account_data, ai.price,
+                   ai.sold_at, ai.sold_to_user_id,
+                   u.username, u.first_name, u.balance, u.referred_by, u.is_banned
+            FROM accounts_inventory ai
+            LEFT JOIN users u ON u.user_id = ai.sold_to_user_id
+            WHERE ai.status = 'sold'
+            ORDER BY ai.sold_at DESC NULLS LAST, ai.id DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [dict(r) for r in rows]
+
+
+async def search_sales(query: str, limit: int = 15) -> list[dict]:
+    """يبحث في المبيعات برقم الهاتف أو آيدي المشتري أو اسم الدولة."""
+    pool = await get_pool()
+    clean_q = query.strip()
+    async with pool.acquire() as db:
+        rows = await db.fetch(
+            """
+            SELECT ai.id, ai.country_code, ai.country_name, ai.account_data, ai.price,
+                   ai.sold_at, ai.sold_to_user_id,
+                   u.username, u.first_name, u.balance, u.referred_by, u.is_banned
+            FROM accounts_inventory ai
+            LEFT JOIN users u ON u.user_id = ai.sold_to_user_id
+            WHERE ai.status = 'sold'
+              AND (
+                  ai.account_data ILIKE $1
+                  OR CAST(ai.sold_to_user_id AS TEXT) ILIKE $1
+                  OR ai.country_name ILIKE $1
+                  OR u.username ILIKE $1
+              )
+            ORDER BY ai.sold_at DESC NULLS LAST
+            LIMIT $2
+            """,
+            f"%{clean_q}%",
+            limit,
+        )
+        return [dict(r) for r in rows]
+
+
+async def get_user_audit_details(user_id: int) -> dict:
+    """يجلب ملف تحقيق كامل عن المستخدم: رصيده، إحالاته، عمليات الشراء، ومن دعاه."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        user = await db.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        if not user:
+            return {}
+        u = dict(user)
+
+        referrer = None
+        if u.get("referred_by"):
+            ref_user = await db.fetchrow(
+                "SELECT user_id, username, first_name FROM users WHERE user_id = $1",
+                u["referred_by"],
+            )
+            referrer = dict(ref_user) if ref_user else {"user_id": u["referred_by"]}
+
+        deposits_sum = await db.fetchval(
+            "SELECT COALESCE(SUM(amount_usd), 0) FROM payments WHERE user_id = $1 AND status = 'confirmed'",
+            user_id,
+        ) or 0.0
+
+        ref_earned = await db.fetchval(
+            "SELECT COALESCE(SUM(reward_usd), 0) FROM referral_logs WHERE referrer_id = $1 AND status = 'approved'",
+            user_id,
+        ) or 0.0
+
+        ref_count = await db.fetchval(
+            "SELECT COUNT(*) FROM referral_logs WHERE referrer_id = $1 AND status = 'approved'",
+            user_id,
+        ) or 0
+
+        fraud_count = await db.fetchval(
+            "SELECT COUNT(*) FROM referral_logs WHERE referrer_id = $1 AND status = 'blocked_fraud'",
+            user_id,
+        ) or 0
+
+        recent_refs = await db.fetch(
+            """
+            SELECT rl.referred_id, rl.reward_usd, rl.status, rl.fraud_reason, rl.created_at,
+                   u2.username, u2.first_name
+            FROM referral_logs rl
+            LEFT JOIN users u2 ON u2.user_id = rl.referred_id
+            WHERE rl.referrer_id = $1
+            ORDER BY rl.created_at DESC
+            LIMIT 10
+            """,
+            user_id,
+        )
+
+        purchases_count = await db.fetchval(
+            "SELECT COUNT(*) FROM accounts_inventory WHERE sold_to_user_id = $1 AND status = 'sold'",
+            user_id,
+        ) or 0
+
+        purchases_sum = await db.fetchval(
+            "SELECT COALESCE(SUM(price), 0) FROM accounts_inventory WHERE sold_to_user_id = $1 AND status = 'sold'",
+            user_id,
+        ) or 0.0
+
+        recent_purchases = await db.fetch(
+            """
+            SELECT id, country_name, account_data, price, sold_at
+            FROM accounts_inventory
+            WHERE sold_to_user_id = $1 AND status = 'sold'
+            ORDER BY sold_at DESC NULLS LAST
+            LIMIT 5
+            """,
+            user_id,
+        )
+
+        return {
+            "user": u,
+            "referrer": referrer,
+            "deposits_sum": float(deposits_sum),
+            "ref_earned": float(ref_earned),
+            "ref_count": int(ref_count),
+            "fraud_count": int(fraud_count),
+            "recent_refs": [dict(r) for r in recent_refs],
+            "purchases_count": int(purchases_count),
+            "purchases_sum": float(purchases_sum),
+            "recent_purchases": [dict(r) for r in recent_purchases],
+        }
+
+
 async def get_admin_referral_stats() -> Dict[str, Any]:
     """يجلب إحصائيات الإحالات العامة للأدمن."""
     pool = await get_pool()
@@ -2401,5 +2547,7 @@ async def get_admin_referral_stats() -> Dict[str, Any]:
             "total_blocked": int(total_blocked),
             "total_paid": float(total_paid),
         }
+
+
 
 
