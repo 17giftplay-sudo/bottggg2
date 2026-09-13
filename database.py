@@ -2461,8 +2461,28 @@ async def get_user_audit_details(user_id: int) -> dict:
             )
             referrer = dict(ref_user) if ref_user else {"user_id": u["referred_by"]}
 
-        deposits_sum = await db.fetchval(
+        auto_deposits_sum = await db.fetchval(
             "SELECT COALESCE(SUM(amount_usd), 0) FROM payments WHERE user_id = $1 AND status = 'confirmed'",
+            user_id,
+        ) or 0.0
+
+        manual_deposits_sum = await db.fetchval(
+            "SELECT COALESCE(SUM(amount_usd), 0) FROM manual_payments WHERE user_id = $1 AND status = 'approved'",
+            user_id,
+        ) or 0.0
+
+        admin_adds_sum = await db.fetchval(
+            """
+            SELECT COALESCE(SUM(amount), 0) FROM transactions 
+            WHERE user_id = $1 AND type = 'deposit' 
+              AND description NOT LIKE 'Payment confirmed%' 
+              AND description NOT LIKE 'Manual Binance%'
+            """,
+            user_id,
+        ) or 0.0
+
+        refunds_sum = await db.fetchval(
+            "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = $1 AND type = 'refund'",
             user_id,
         ) or 0.0
 
@@ -2515,10 +2535,25 @@ async def get_user_audit_details(user_id: int) -> dict:
             user_id,
         )
 
+        recent_txs = await db.fetch(
+            """
+            SELECT type, amount, description, created_at
+            FROM transactions
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT 8
+            """,
+            user_id,
+        )
+
         return {
             "user": u,
             "referrer": referrer,
-            "deposits_sum": float(deposits_sum),
+            "auto_deposits_sum": float(auto_deposits_sum),
+            "manual_deposits_sum": float(manual_deposits_sum),
+            "admin_adds_sum": float(admin_adds_sum),
+            "refunds_sum": float(refunds_sum),
+            "total_deposited_field": float(u.get("total_deposited") or 0.0),
             "ref_earned": float(ref_earned),
             "ref_count": int(ref_count),
             "fraud_count": int(fraud_count),
@@ -2526,7 +2561,9 @@ async def get_user_audit_details(user_id: int) -> dict:
             "purchases_count": int(purchases_count),
             "purchases_sum": float(purchases_sum),
             "recent_purchases": [dict(r) for r in recent_purchases],
+            "recent_txs": [dict(r) for r in recent_txs],
         }
+
 
 
 async def get_admin_referral_stats() -> Dict[str, Any]:

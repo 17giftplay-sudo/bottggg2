@@ -4812,11 +4812,15 @@ async def _format_and_send_user_audit(event, user_id: int):
     joined_at = u.get("joined_at")
     joined_str = joined_at.strftime("%Y-%m-%d %H:%M") if joined_at else "غير مسجل"
 
-    deposits_sum = details.get("deposits_sum", 0.0)
+    auto_deposits = details.get("auto_deposits_sum", 0.0)
+    manual_deposits = details.get("manual_deposits_sum", 0.0)
+    admin_adds = details.get("admin_adds_sum", 0.0)
+    refunds = details.get("refunds_sum", 0.0)
     ref_earned = details.get("ref_earned", 0.0)
     ref_count = details.get("ref_count", 0)
     fraud_count = details.get("fraud_count", 0)
     referrer = details.get("referrer")
+    total_in = auto_deposits + manual_deposits + admin_adds + ref_earned + refunds
 
     if referrer:
         ref_id = referrer.get("user_id")
@@ -4829,6 +4833,7 @@ async def _format_and_send_user_audit(event, user_id: int):
     purchases_sum = details.get("purchases_sum", 0.0)
     recent_purchases = details.get("recent_purchases", [])
     recent_refs = details.get("recent_refs", [])
+    recent_txs = details.get("recent_txs", [])
 
     text = (
         f"🕵️ <b>ملف التحقيق والتدقيق الأمني:</b>\n"
@@ -4839,13 +4844,17 @@ async def _format_and_send_user_audit(event, user_id: int):
         f"📅 تاريخ التسجيل: {joined_str}\n"
         f"🚫 حالة الحساب: {'⛔ <b>محظور</b> (' + ban_reason + ')' if is_banned else '✅ <b>نشط</b>'}\n"
         f"💰 الرصيد الحالي: <b>${balance:.2f}</b> | 🪙 {points} نقطة\n\n"
-        f"💳 <b>سجل الأموال والإيداعات:</b>\n"
-        f"• إجمالي الشحن الحقيقي: <b>${deposits_sum:.2f}</b>\n"
-        f"• أرباح الإحالات المكتسبة: <b>${ref_earned:.2f}</b> ({ref_count} إحالة ناجحة)\n"
-        f"• محاولات إحالة وهمية تم صدها: <b>{fraud_count}</b>\n"
-        f"• الداعي (من أحضره): {referrer_text}\n\n"
+        f"💳 <b>سجل مصادر الأموال الداخلة لحسابه:</b>\n"
+        f"• شحن تلقائي (Crypto / Stars): <b>${auto_deposits:.2f}</b>\n"
+        f"• شحن بينانس يدوي (معتمد): <b>${manual_deposits:.2f}</b>\n"
+        f"• شحن يدوي من الأدمن: <b>${admin_adds:.2f}</b>\n"
+        f"• أرباح الإحالات: <b>${ref_earned:.2f}</b> ({ref_count} إحالة ناجحة)\n"
+        f"• مبالغ مستردة لأرقام فاشلة (Refunds): <b>${refunds:.2f}</b>\n"
+        f"💵 <b>إجمالي كل ما دخل الرصيد:</b> <b>${total_in:.2f}</b>\n"
+        f"⚠️ محاولات إحالة وهمية تم صدها: <b>{fraud_count}</b>\n"
+        f"🔗 الداعي (من أحضره): {referrer_text}\n\n"
         f"🛒 <b>سجل المشتريات:</b>\n"
-        f"• إجمالي الشراء: <b>{purchases_count}</b> حساب بقيمة <b>${purchases_sum:.2f}</b>\n"
+        f"• إجمالي الشراء الناجح: <b>{purchases_count}</b> حساب بقيمة <b>${purchases_sum:.2f}</b>\n"
     )
 
     if recent_purchases:
@@ -4859,6 +4868,17 @@ async def _format_and_send_user_audit(event, user_id: int):
             p_time = p_sold_at.strftime("%m-%d %H:%M") if p_sold_at else ""
             text += f" - {p_country} (<code>{p_phone}</code>) بـ ${p_price:.2f} [{p_time}]\n"
 
+    if recent_txs:
+        text += "\n🧾 <i>آخر الحركات المالية (Transactions):</i>\n"
+        for tx in recent_txs[:5]:
+            t_type = tx.get("type") or "tx"
+            t_amt = float(tx.get("amount") or 0.0)
+            t_desc = tx.get("description") or ""
+            # short desc
+            if len(t_desc) > 30:
+                t_desc = t_desc[:27] + "..."
+            text += f" • <code>{t_type}</code>: ${t_amt:.2f} ({t_desc})\n"
+
     if recent_refs:
         text += "\n👥 <i>سجل آخر الإحالات التي جلبها:</i>\n"
         for r in recent_refs:
@@ -4867,6 +4887,7 @@ async def _format_and_send_user_audit(event, user_id: int):
             r_status_icon = "✅" if r_status == "approved" else "⛔ مرفوض"
             r_uname = f"@{r.get('username')}" if r.get("username") else f"<code>{r_uid}</code>"
             text += f" - {r_uname}: {r_status_icon} (+${float(r.get('reward_usd') or 0):.2f})\n"
+
 
     builder = InlineKeyboardBuilder()
     if is_banned:
