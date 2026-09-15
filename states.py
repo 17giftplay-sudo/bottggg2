@@ -39,6 +39,8 @@ class AdminState(StatesGroup):
     waiting_for_new_country_old_price = State()
     waiting_for_new_price = State()
     waiting_for_new_old_price = State()
+    waiting_for_stock_price_fix = State()
+    waiting_for_live_price_fix = State()
     waiting_for_new_points_price = State()
     waiting_for_flash_sale_discount = State()
     waiting_for_flash_sale_hours = State()

@@ -996,14 +996,20 @@ async def get_countries_with_stock(category: str = "regular") -> List[Dict[str, 
         results = []
         for r in rows:
             d = dict(r)
+            base_price = float(d.get("price") or 0.0)
+            if base_price <= 0:
+                continue
             discount  = float(d.get("flash_sale_discount") or 0)
             until     = d.get("flash_sale_until")
             if discount > 0 and until and until > now:
                 d["has_flash_sale"]  = True
-                d["effective_price"] = round(float(d["price"]) * (1 - discount / 100), 4)
+                d["effective_price"] = round(base_price * (1 - discount / 100), 4)
             else:
                 d["has_flash_sale"]  = False
-                d["effective_price"] = float(d["price"])
+                d["effective_price"] = base_price
+            if d["effective_price"] <= 0:
+                continue
+            d["price"] = base_price
             results.append(d)
         return results
 
@@ -1158,13 +1164,16 @@ async def purchase_account(user_id: int, country_code: str, category: str = "reg
             else:
                 raw_price = float(country["price"])
 
+            if raw_price <= 0:
+                return None
+
             price = raw_price
             discount  = float(country.get("flash_sale_discount") or 0)
             flash_until = country.get("flash_sale_until")
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             if discount > 0 and flash_until and flash_until > now:
                 price = round(price * (1 - discount / 100), 4)
-            if float(user["balance"]) < price:
+            if price <= 0 or float(user["balance"]) < price:
                 return None
 
             account = await db.fetchrow(

@@ -277,6 +277,14 @@ async def ask_confirm_purchase(callback: CallbackQuery, state: FSMContext):
 
     ep = _effective_price(country, category=category)
 
+    if ep <= 0:
+        await callback.answer(
+            "⚠️ هذا القسم غير متاح للشراء حالياً (لم يتم تحديد السعر)." if lang == "ar"
+            else "⚠️ This section is not available for purchase currently.",
+            show_alert=True,
+        )
+        return
+
     if float(user["balance"]) < ep:
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 شحن الرصيد", callback_data="menu:topup")
@@ -356,7 +364,7 @@ async def execute_purchase(callback: CallbackQuery, state: FSMContext, bot: Bot)
     country = await get_country(country_code)
     ep = _effective_price(country, category=category) if country else 0
 
-    if not country or float(user["balance"]) < ep:
+    if not country or ep <= 0 or float(user["balance"]) < ep:
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 شحن الرصيد", callback_data="menu:topup")
         builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")

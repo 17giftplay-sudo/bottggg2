@@ -877,8 +877,31 @@ async def admin_add_stock_cat_cb(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
         return
 
-    price = float(country.get("old_price") or country["price"]) if category == "old" else float(country["price"])
+    price = float(country.get("old_price") or 0.0) if category == "old" else float(country.get("price") or 0.0)
     cat_label = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
+    flag = country.get("flag_emoji", "")
+
+    if price <= 0:
+        await state.update_data(
+            stock_country=code,
+            stock_country_name=country["country_name"],
+            stock_type="dollar",
+            stock_category=category,
+            stock_cat_label=cat_label,
+            stock_flag=flag,
+        )
+        await state.set_state(AdminState.waiting_for_stock_price_fix)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="❌ إلغاء", callback_data="admin:stock")
+        await callback.message.edit_text(
+            f"⚠️ <b>تنبيه: سعر {cat_label} لـ {flag} {country['country_name']} هو $0.00!</b>\n\n"
+            "لتجنب أخذ الحسابات مجاناً من قبل الزبائن، يرجى تحديد السعر أولاً.\n"
+            "💵 <b>أرسل السعر بالدولار الآن لحفظه (مثال: 1.50):</b>",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
 
     await state.update_data(
         stock_country=code,
@@ -889,7 +912,6 @@ async def admin_add_stock_cat_cb(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(AdminState.waiting_for_stock_data)
 
-    flag = country.get("flag_emoji", "")
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ إلغاء", callback_data="admin:stock")
 
@@ -909,6 +931,58 @@ async def admin_add_stock_cat_cb(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.message(AdminState.waiting_for_stock_price_fix)
+async def admin_save_stock_price_fix(message: Message, state: FSMContext):
+    if not await _is_admin_or_has_perm(message.from_user.id, "stock"):
+        return
+    if message.text and message.text.startswith("/"):
+        await state.clear()
+        await message.answer("❌ تم الإلغاء.")
+        return
+
+    try:
+        new_price = float(message.text.strip().replace("$", ""))
+        if new_price <= 0:
+            raise ValueError()
+    except (ValueError, TypeError):
+        await message.answer("❌ يرجى إرسال رقم صحيح أكبر من 0 (مثال: 1.50):")
+        return
+
+    data = await state.get_data()
+    code = data.get("stock_country")
+    category = data.get("stock_category", "regular")
+    cat_label = data.get("stock_cat_label", "📱 حسابات عادية")
+    country_name = data.get("stock_country_name", "")
+    flag = data.get("stock_flag", "")
+
+    if category == "old":
+        await update_country_old_price(code, new_price)
+    else:
+        await update_country_price(code, new_price)
+
+    await state.update_data(stock_price=new_price)
+    await state.set_state(AdminState.waiting_for_stock_data)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ إلغاء", callback_data="admin:stock")
+
+    format_hint = (
+        f"✅ <b>تم حفظ السعر بنجاح: ${new_price:.2f}</b>\n\n"
+        f"📦 <b>إضافة مخزون — {flag} {country_name} ({cat_label})</b>\n"
+        f"💵 السعر المحدد: <b>${new_price:.2f}</b>\n\n"
+        "📋 أرسل بيانات الحساب — يُقبل:\n"
+        "• نص مباشر بصيغة <code>رقم::session_string</code> أو الصيغة الكاملة\n"
+        "• ملف <b>.zip</b> — Telethon Session Zip\n"
+        "• ملف <b>.txt</b> — سطر لكل حساب (Pyrogram)"
+    )
+
+    await message.answer(
+        format_hint,
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
 
 
 
@@ -3941,9 +4015,31 @@ async def admin_live_add_cat_cb(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
         return
 
-    price = float(country.get("old_price") or country["price"]) if category == "old" else float(country["price"])
+    price = float(country.get("old_price") or 0.0) if category == "old" else float(country.get("price") or 0.0)
     cat_label = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
     flag = country.get("flag_emoji", "🌍")
+
+    if price <= 0:
+        await state.update_data(
+            live_country_code=code,
+            live_country_name=country["country_name"],
+            live_flag=flag,
+            live_store_type="dollar",
+            live_category=category,
+            live_cat_label=cat_label,
+        )
+        await state.set_state(AdminState.waiting_for_live_price_fix)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="❌ إلغاء", callback_data="admin:stock")
+        await callback.message.edit_text(
+            f"⚠️ <b>تنبيه: سعر {cat_label} لـ {flag} {country['country_name']} هو $0.00!</b>\n\n"
+            "لتجنب أخذ الحسابات مجاناً من قبل الزبائن، يرجى تحديد السعر أولاً.\n"
+            "💵 <b>أرسل السعر بالدولار الآن لحفظه (مثال: 1.50):</b>",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
 
     await state.update_data(
         live_country_code=code,
@@ -3968,6 +4064,52 @@ async def admin_live_add_cat_cb(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.message(AdminState.waiting_for_live_price_fix)
+async def admin_save_live_price_fix(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if message.text and message.text.startswith("/"):
+        await state.clear()
+        await message.answer("❌ تم الإلغاء.")
+        return
+
+    try:
+        new_price = float(message.text.strip().replace("$", ""))
+        if new_price <= 0:
+            raise ValueError()
+    except (ValueError, TypeError):
+        await message.answer("❌ يرجى إرسال رقم صحيح أكبر من 0 (مثال: 1.50):")
+        return
+
+    data = await state.get_data()
+    code = data.get("live_country_code")
+    category = data.get("live_category", "regular")
+    cat_label = data.get("live_cat_label", "📱 حسابات عادية")
+    country_name = data.get("live_country_name", "")
+    flag = data.get("live_flag", "🌍")
+
+    if category == "old":
+        await update_country_old_price(code, new_price)
+    else:
+        await update_country_price(code, new_price)
+
+    await state.update_data(live_price_dollar=new_price)
+    await state.set_state(AdminState.waiting_for_live_phone)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ إلغاء", callback_data="admin:stock")
+
+    await message.answer(
+        f"✅ <b>تم حفظ السعر بنجاح: ${new_price:.2f}</b>\n\n"
+        f"📱 <b>إضافة رقم مباشرة — {flag} {country_name} ({cat_label})</b>\n"
+        f"💵 السعر المحدد: <b>${new_price:.2f}</b>\n\n"
+        "أرسل رقم الهاتف بصيغة دولية كاملة، مثال:\n"
+        "<code>+213799898306</code>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
 
 
 @router.message(AdminState.waiting_for_live_phone)
