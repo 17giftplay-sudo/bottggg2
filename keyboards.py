@@ -327,6 +327,16 @@ def admin_stock_category_keyboard(code: str, reg_price: float, old_price: float)
     return builder.as_markup()
 
 
+def admin_live_add_category_keyboard(code: str, reg_price: float, old_price: float) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"📱  حسابات عادية (${reg_price:.2f})", callback_data=f"live_add_cat:regular:{code}")
+    builder.button(text=f"🏛️  أرقام قديمة (${old_price:.2f})", callback_data=f"live_add_cat:old:{code}")
+    builder.button(text="❌  إلغاء", callback_data="admin:stock")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+
 def admin_change_price_category_keyboard(code: str, reg_price: float, old_price: float) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=f"📱  سعر الحسابات العادية (الحالي: ${reg_price:.2f})", callback_data=f"chprice_cat:regular:{code}")

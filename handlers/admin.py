@@ -42,6 +42,7 @@ from keyboards import (
     admin_back_keyboard,
     admin_flash_sale_keyboard,
     admin_stock_category_keyboard, admin_change_price_category_keyboard,
+    admin_live_add_category_keyboard,
 )
 
 router = Router()
@@ -3902,7 +3903,7 @@ async def admin_live_add_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("live_add_country:"))
 async def admin_live_add_country(callback: CallbackQuery, state: FSMContext):
-    """الخطوة 2 — اطلب رقم الهاتف مباشرة (متجر الدولار تلقائياً)."""
+    """الخطوة 2 — اطلب تحديد الفئة (عادية أو قديمة)."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔", show_alert=True)
         return
@@ -3913,21 +3914,54 @@ async def admin_live_add_country(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
         return
 
+    reg_p = float(country.get("price") or 0.0)
+    old_p = float(country.get("old_price") or 0.0)
+    flag  = country.get("flag_emoji", "")
+
+    await callback.message.edit_text(
+        f"📱 <b>إضافة رقم مباشرة — {flag} {country['country_name']} ({code})</b>\n\n"
+        f"اختر الفئة التي تريد إضافة الرقم إليها:",
+        reply_markup=admin_live_add_category_keyboard(code, reg_p, old_p),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("live_add_cat:"))
+async def admin_live_add_cat_cb(callback: CallbackQuery, state: FSMContext):
+    """الخطوة 3 — استقبل الفئة واطلب رقم الهاتف."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    category = parts[1]
+    code = parts[2].upper()
+    country = await get_country(code)
+    if not country:
+        await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
+        return
+
+    price = float(country.get("old_price") or country["price"]) if category == "old" else float(country["price"])
+    cat_label = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
+    flag = country.get("flag_emoji", "🌍")
+
     await state.update_data(
         live_country_code=code,
         live_country_name=country["country_name"],
-        live_price_dollar=float(country["price"]),
-        live_flag=country.get("flag_emoji", "🌍"),
+        live_price_dollar=price,
+        live_flag=flag,
         live_store_type="dollar",
+        live_category=category,
+        live_cat_label=cat_label,
     )
     await state.set_state(AdminState.waiting_for_live_phone)
 
-    flag = country.get("flag_emoji", "")
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ إلغاء", callback_data="admin:stock")
 
     await callback.message.edit_text(
-        f"📱 <b>إضافة رقم مباشرة — {flag} {country['country_name']}</b>\n\n"
+        f"📱 <b>إضافة رقم مباشرة — {flag} {country['country_name']} ({cat_label})</b>\n"
+        f"💵 السعر المحدد: <b>${price:.2f}</b>\n\n"
         "أرسل رقم الهاتف بصيغة دولية كاملة، مثال:\n"
         "<code>+213799898306</code>",
         reply_markup=builder.as_markup(),
@@ -4293,6 +4327,9 @@ async def _finish_live_add(
     store_type   = data.get("live_store_type", "dollar")
     flag         = data.get("live_flag", "🌍")
 
+    category     = data.get("live_category", "regular")
+    cat_label    = data.get("live_cat_label", "📱 حسابات عادية")
+
     price = (
         data.get("live_price_dollar", 0.0)
         if store_type == "dollar"
@@ -4336,6 +4373,7 @@ async def _finish_live_add(
             account_data=account_line,
             price=price,
             store_type=store_type,
+            account_category=category,
         )
     except Exception as e:
         logger.error("live_add add_account_to_stock error: %s", e)
@@ -4358,8 +4396,9 @@ async def _finish_live_add(
         f"✅ <b>تمت إضافة الحساب بنجاح!</b>\n\n"
         f"📞 الرقم: <code>{phone}</code>\n"
         f"🌍 الدولة: <b>{flag} {country_name}</b>\n"
+        f"📁 الفئة: <b>{cat_label}</b>\n"
         f"🛒 النوع: <b>{'💵 دولار' if store_type == 'dollar' else '🪙 نقاط'}</b>\n"
-        f"💰 السعر: <b>{price:.2f}</b>\n\n"
+        f"💰 السعر: <b>${price:.2f}</b>\n\n"
         f"هل تريد مسح بيانات الحساب (مجموعات، قنوات، محادثات، صور)؟",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
