@@ -211,6 +211,9 @@ async def init_db():
             await db.execute(
                 "ALTER TABLE pending_leaves ADD COLUMN IF NOT EXISTS deadline TIMESTAMP NOT NULL DEFAULT NOW()"
             )
+            # رفع الحظر تلقائياً عن أي مستخدم تم حظره سابقاً بسبب مغادرة القناة
+            await db.execute("UPDATE users SET is_banned = 0, ban_reason = NULL WHERE ban_reason = 'left_channel'")
+            await db.execute("DELETE FROM pending_leaves")
         except Exception:
             pass
 
