@@ -12,7 +12,7 @@ from states import BuyState
 from database import get_user, get_countries_with_stock, purchase_account, get_country, get_setting
 from config import ADMIN_IDS
 from translations import t
-from keyboards import countries_keyboard, back_to_main_keyboard
+from keyboards import countries_keyboard, back_to_main_keyboard, buy_category_keyboard
 from utils.session_manager import wait_for_login_code
 
 router = Router()
@@ -26,8 +26,15 @@ async def _sell_enabled(user_id: int = 0) -> bool:
     return (val or "1") == "1"
 
 
-def _effective_price(country: dict) -> float:
-    price = float(country["price"])
+def _effective_price(country: dict, category: str = "regular") -> float:
+    if category == "old":
+        raw_price = float(country.get("old_price") or country["price"])
+        if raw_price <= 0:
+            raw_price = float(country["price"])
+    else:
+        raw_price = float(country["price"])
+
+    price = raw_price
     discount = float(country.get("flash_sale_discount") or 0)
     flash_until = country.get("flash_sale_until")
     if discount > 0 and flash_until:
@@ -40,9 +47,8 @@ _MAX_PAGE     = 500
 _MAX_CODE_LEN = 10
 
 
-
 @router.callback_query(F.data == "menu:buy")
-async def show_buy_menu(callback: CallbackQuery, state: FSMContext):
+async def show_buy_categories(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     user = await get_user(callback.from_user.id)
     if not user:
@@ -57,19 +63,69 @@ async def show_buy_menu(callback: CallbackQuery, state: FSMContext):
         )
         return
 
-    countries = await get_countries_with_stock()
+    text = (
+        f"🛒 <b>متجر الحسابات الجاهزة</b>\n\n"
+        f"💰 رصيدك الحالي: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"اختر نوع الحسابات المطلوب تصفحه:"
+    ) if lang == "ar" else (
+        f"🛒 <b>Ready Accounts Store</b>\n\n"
+        f"💰 Current Balance: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"Select the accounts category to browse:"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=buy_category_keyboard(lang),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("buy_cat:"))
+async def show_category_countries(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    category = callback.data.split(":", 1)[1]
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer()
+        return
+    lang = user.get("language", "en")
+
+    if not await _sell_enabled(callback.from_user.id):
+        await callback.answer(
+            "🔴 المتجر متوقف مؤقتاً." if lang == "ar" else "🔴 Store is temporarily closed.",
+            show_alert=True,
+        )
+        return
+
+    countries = await get_countries_with_stock(category=category)
+    cat_name = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
     if not countries:
+        builder = InlineKeyboardBuilder()
+        other_cat = "regular" if category == "old" else "old"
+        other_label = "📱 تصفح الحسابات العادية" if category == "old" else "🏛️ تصفح الأرقام القديمة"
+        builder.button(text=other_label, callback_data=f"buy_cat:{other_cat}")
+        builder.button(text=t(lang, "btn_back"), callback_data="menu:buy")
+        builder.adjust(1)
         await callback.message.edit_text(
-            t(lang, "no_countries"),
-            reply_markup=back_to_main_keyboard(lang),
+            f"📭 <b>لا توجد {cat_name} متوفرة حالياً في المخزون.</b>\n\nيمكنك مراجعة القسم الآخر أو العودة لاحقاً.",
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
+    text = (
+        f"🛒 <b>متجر الحسابات الجاهزة — {cat_name}</b>\n\n"
+        f"💰 رصيدك الحالي: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"اختر الدولة للشراء واستلام كود الدخول فوراً:"
+    ) if lang == "ar" else (
+        f"🛒 <b>Ready Accounts Store — {cat_name}</b>\n\n"
+        f"💰 Balance: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"Select a country to purchase:"
+    )
     await callback.message.edit_text(
-        t(lang, "buy_menu", balance=float(user["balance"])),
-        reply_markup=countries_keyboard(lang, countries, page=0),
+        text,
+        reply_markup=countries_keyboard(lang, countries, page=0, store_type="dollar", category=category),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -78,8 +134,14 @@ async def show_buy_menu(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("buy_page:"))
 async def buy_page(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    parts = callback.data.split(":")
+    if len(parts) >= 3:
+        category = parts[1]
+        raw_page = parts[2]
+    else:
+        category = "regular"
+        raw_page = parts[1]
 
-    raw_page = callback.data.split(":", 1)[1]
     try:
         page = int(raw_page)
         if page < 0 or page > _MAX_PAGE:
@@ -94,7 +156,8 @@ async def buy_page(callback: CallbackQuery, state: FSMContext):
         return
     lang = user.get("language", "en")
 
-    countries = await get_countries_with_stock()
+    countries = await get_countries_with_stock(category=category)
+    cat_name = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
     if not countries:
         await callback.message.edit_text(
             t(lang, "no_countries"),
@@ -104,16 +167,27 @@ async def buy_page(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    text = (
+        f"🛒 <b>متجر الحسابات الجاهزة — {cat_name}</b>\n\n"
+        f"💰 رصيدك الحالي: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"اختر الدولة للشراء واستلام كود الدخول فوراً:"
+    ) if lang == "ar" else (
+        f"🛒 <b>Ready Accounts Store — {cat_name}</b>\n\n"
+        f"💰 Balance: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"Select a country to purchase:"
+    )
     await callback.message.edit_text(
-        t(lang, "buy_menu", balance=float(user["balance"])),
-        reply_markup=countries_keyboard(lang, countries, page=page),
+        text,
+        reply_markup=countries_keyboard(lang, countries, page=page, store_type="dollar", category=category),
         parse_mode="HTML",
     )
     await callback.answer()
 
 
-@router.callback_query(F.data == "buy_search")
+@router.callback_query(F.data.startswith("buy_search"))
 async def buy_search_prompt(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    category = parts[1] if len(parts) > 1 else "regular"
     user = await get_user(callback.from_user.id)
     if not user:
         await callback.answer()
@@ -121,9 +195,12 @@ async def buy_search_prompt(callback: CallbackQuery, state: FSMContext):
     lang = user.get("language", "en")
 
     await state.set_state(BuyState.searching_country)
+    await state.update_data(search_category=category)
+    builder = InlineKeyboardBuilder()
+    builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")
     await callback.message.edit_text(
         t(lang, "buy_search_prompt"),
-        reply_markup=back_to_main_keyboard(lang),
+        reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -131,31 +208,36 @@ async def buy_search_prompt(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BuyState.searching_country)
 async def buy_search_handle(message: Message, state: FSMContext):
+    data = await state.get_data()
+    category = data.get("search_category", "regular")
     await state.clear()
     user = await get_user(message.from_user.id)
     if not user:
         return
     lang = user.get("language", "en")
 
-    query         = message.text.strip().lower()
-    all_countries = await get_countries_with_stock()
+    query = message.text.strip().lower()
+    all_countries = await get_countries_with_stock(category=category)
     results = [
         c for c in all_countries
         if query in c["country_name"].lower() or query in c["country_code"].lower()
     ]
 
+    builder = InlineKeyboardBuilder()
+    builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")
     if not results:
         safe_query = html_module.escape(message.text.strip())
         await message.answer(
             t(lang, "buy_search_no_results", query=safe_query),
-            reply_markup=back_to_main_keyboard(lang),
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         return
 
+    cat_name = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
     await message.answer(
-        t(lang, "buy_menu", balance=float(user["balance"])),
-        reply_markup=countries_keyboard(lang, results, page=0),
+        f"🔎 <b>نتائج البحث في {cat_name}:</b>\n💰 رصيدك: <b>${float(user['balance']):.2f}</b>",
+        reply_markup=countries_keyboard(lang, results, page=0, store_type="dollar", category=category),
         parse_mode="HTML",
     )
 
@@ -163,18 +245,24 @@ async def buy_search_handle(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("buy:"))
 async def ask_confirm_purchase(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    parts = callback.data.split(":")
+    if len(parts) >= 3:
+        category = parts[1]
+        country_code = parts[2]
+    else:
+        category = "regular"
+        country_code = parts[1]
 
-    country_code = callback.data.split(":", 1)[1]
     if not country_code or len(country_code) > _MAX_CODE_LEN or not country_code.isalpha():
         await callback.answer("Invalid country.", show_alert=True)
         return
 
     country_code = country_code.upper()
-    user         = await get_user(callback.from_user.id)
+    user = await get_user(callback.from_user.id)
     if not user:
         await callback.answer()
         return
-    lang    = user.get("language", "en")
+    lang = user.get("language", "en")
 
     if not await _sell_enabled(callback.from_user.id):
         await callback.answer(
@@ -183,35 +271,51 @@ async def ask_confirm_purchase(callback: CallbackQuery, state: FSMContext):
         )
         return
     country = await get_country(country_code)
-
     if not country:
         await callback.answer(t(lang, "error_generic"), show_alert=True)
         return
 
-    ep = _effective_price(country)
+    ep = _effective_price(country, category=category)
 
     if float(user["balance"]) < ep:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="💳 شحن الرصيد", callback_data="menu:topup")
+        builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")
+        builder.adjust(1)
         await callback.message.edit_text(
-            t(lang, "insufficient_balance",
-              price=ep,
-              balance=float(user["balance"])),
-            reply_markup=back_to_main_keyboard(lang),
+            t(lang, "insufficient_balance", price=ep, balance=float(user["balance"])),
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
+    cat_label = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
     flag = country.get("flag_emoji", "")
     builder = InlineKeyboardBuilder()
-    builder.button(text=t(lang, "btn_confirm"), callback_data=f"confirm_buy:{country_code}")
-    builder.button(text=t(lang, "btn_cancel"),  callback_data="menu:buy")
+    builder.button(text=t(lang, "btn_confirm"), callback_data=f"confirm_buy:{category}:{country_code}")
+    builder.button(text=t(lang, "btn_cancel"),  callback_data=f"buy_cat:{category}")
     builder.adjust(1)
 
+    confirm_msg = (
+        f"🛍️ <b>تأكيد عملية الشراء</b>\n\n"
+        f"🏷️ القسم: <b>{cat_label}</b>\n"
+        f"🌍 الدولة: <b>{flag} {country['country_name']}</b>\n"
+        f"💵 السعر: <b>${ep:.2f}</b>\n"
+        f"💰 رصيدك الحالي: <b>${float(user['balance']):.2f}</b>\n"
+        f"💳 المتبقي بعد الشراء: <b>${(float(user['balance']) - ep):.2f}</b>\n\n"
+        f"هل أنت متأكد من الشراء واستلام كود الدخول؟"
+    ) if lang == "ar" else (
+        f"🛍️ <b>Confirm Purchase</b>\n\n"
+        f"🏷️ Category: <b>{cat_label}</b>\n"
+        f"🌍 Country: <b>{flag} {country['country_name']}</b>\n"
+        f"💵 Price: <b>${ep:.2f}</b>\n"
+        f"💰 Balance: <b>${float(user['balance']):.2f}</b>\n\n"
+        f"Are you sure you want to proceed?"
+    )
+
     await callback.message.edit_text(
-        t(lang, "confirm_purchase",
-          country=f"{flag} {country['country_name']}",
-          price=ep,
-          balance=float(user["balance"])),
+        confirm_msg,
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -221,15 +325,21 @@ async def ask_confirm_purchase(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("confirm_buy:"))
 async def execute_purchase(callback: CallbackQuery, state: FSMContext, bot: Bot):
     await state.clear()
+    parts = callback.data.split(":")
+    if len(parts) >= 3:
+        category = parts[1]
+        country_code = parts[2]
+    else:
+        category = "regular"
+        country_code = parts[1]
 
-    country_code = callback.data.split(":", 1)[1]
     if not country_code or len(country_code) > _MAX_CODE_LEN or not country_code.isalpha():
         await callback.answer("Invalid country.", show_alert=True)
         return
 
     country_code = country_code.upper()
-    user_id      = callback.from_user.id
-    user         = await get_user(user_id)
+    user_id = callback.from_user.id
+    user = await get_user(user_id)
     if not user:
         await callback.answer()
         return
@@ -244,53 +354,46 @@ async def execute_purchase(callback: CallbackQuery, state: FSMContext, bot: Bot)
         )
         return
     country = await get_country(country_code)
-
-    # FIX #5: نعيد حساب السعر الفعلي لحظة التنفيذ (لا نعتمد على سعر شاشة التأكيد).
-    # الخطأ الأصلي: السعر المعروض قد يختلف عن السعر الفعلي إذا انتهت الـ flash sale
-    #               بين لحظة الضغط على "تأكيد" ولحظة التنفيذ الفعلي.
-    # الضرر: المستخدم يرى سعر عرض ويُخصم منه السعر الأصلي بدون إشعار، أو العكس.
-    # الإصلاح: نحسب ep مجدداً هنا — وهو نفس ما يحسبه purchase_account داخل DB transaction.
-    ep = _effective_price(country) if country else 0
+    ep = _effective_price(country, category=category) if country else 0
 
     if not country or float(user["balance"]) < ep:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="💳 شحن الرصيد", callback_data="menu:topup")
+        builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")
+        builder.adjust(1)
         await callback.message.edit_text(
-            t(lang, "insufficient_balance",
-              price=ep,
-              balance=float(user["balance"])),
-            reply_markup=back_to_main_keyboard(lang),
+            t(lang, "insufficient_balance", price=ep, balance=float(user["balance"])),
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
     try:
-        result = await purchase_account(user_id, country_code)
+        result = await purchase_account(user_id, country_code, category=category)
     except Exception as e:
-        if "no_stock" in str(e):
-            await callback.message.edit_text(
-                t(lang, "no_stock_for_country", country=country["country_name"]),
-                reply_markup=back_to_main_keyboard(lang),
-                parse_mode="HTML",
-            )
-            await callback.answer()
-            return
         logger.error("Unexpected error in purchase_account: %s", e)
+        builder = InlineKeyboardBuilder()
+        builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")
         await callback.message.edit_text(
             t(lang, "error_generic"),
-            reply_markup=back_to_main_keyboard(lang),
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
     if result is None:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=t(lang, "btn_back"), callback_data=f"buy_cat:{category}")
         await callback.message.edit_text(
             t(lang, "no_stock_for_country", country=country["country_name"]),
-            reply_markup=back_to_main_keyboard(lang),
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
+
 
     flag       = country.get("flag_emoji", "")
     phone      = result["account_data"].split("::")[0].strip()

@@ -124,11 +124,30 @@ def topup_keyboard(lang: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def buy_category_keyboard(lang: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if lang == "fa":
+        builder.button(text="📱  اکانت‌های عادی (آماده)", callback_data="buy_cat:regular")
+        builder.button(text="🏛️  شماره‌های قدیمی (قدیمی)", callback_data="buy_cat:old")
+        builder.button(text="🔙  بازگشت به منو", callback_data="menu:main")
+    elif lang == "ar":
+        builder.button(text="📱  حسابات عادية (جاهزة)", callback_data="buy_cat:regular")
+        builder.button(text="🏛️  أرقام قديمة", callback_data="buy_cat:old")
+        builder.button(text="🔙  الرجوع للقائمة الرئيسية", callback_data="menu:main")
+    else:
+        builder.button(text="📱  Regular Accounts", callback_data="buy_cat:regular")
+        builder.button(text="🏛️  Old / Aged Accounts", callback_data="buy_cat:old")
+        builder.button(text="🔙  Back to Main Menu", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def countries_keyboard(
     lang: str,
     countries: List[Dict[str, Any]],
     page: int = 0,
     store_type: str = "dollar",
+    category: str = "regular",
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * COUNTRIES_PER_PAGE
@@ -164,12 +183,12 @@ def countries_keyboard(
                 disc = float(c.get("flash_sale_discount", 0))
                 builder.button(
                     text=f"{flag}  {c['country_name']}  [{qty}]  ·  ⚡ ${eff:.2f}  (-{disc:.0f}%)",
-                    callback_data=f"buy:{c['country_code']}",
+                    callback_data=f"buy:{category}:{c['country_code']}",
                 )
             else:
                 builder.button(
                     text=f"{flag}  {c['country_name']}  [{qty}]  ·  ${float(c['price']):.2f}",
-                    callback_data=f"buy:{c['country_code']}",
+                    callback_data=f"buy:{category}:{c['country_code']}",
                 )
     builder.adjust(1)
 
@@ -186,9 +205,9 @@ def countries_keyboard(
             nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"sessions_page:{page+1}"))
     else:
         if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"buy_page:{page-1}"))
+            nav.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"buy_page:{category}:{page-1}"))
         if end < len(countries):
-            nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"buy_page:{page+1}"))
+            nav.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"buy_page:{category}:{page+1}"))
     if nav:
         builder.row(*nav)
 
@@ -198,9 +217,11 @@ def countries_keyboard(
         builder.row(InlineKeyboardButton(text="🛒  شراء حساب عادي (مع كود دخول)" if lang == "ar" else "🛒  Buy Regular Account (with code)", callback_data="menu:buy"))
         builder.row(InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="menu:main"))
     else:
-        builder.row(InlineKeyboardButton(text=t(lang, "btn_search"), callback_data="buy_search"))
+        builder.row(InlineKeyboardButton(text=t(lang, "btn_search"), callback_data=f"buy_search:{category}"))
+        builder.row(InlineKeyboardButton(text="🔙  تغيير القسم" if lang == "ar" else "🔙  Change Category", callback_data="menu:buy"))
         builder.row(InlineKeyboardButton(text=t(lang, "btn_back"),   callback_data="menu:main"))
     return builder.as_markup()
+
 
 
 def request_contact_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -295,6 +316,25 @@ def admin_stock_type_keyboard(code: str) -> InlineKeyboardMarkup:
     builder.button(text="🔙  رجوع", callback_data="admin:stock")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def admin_stock_category_keyboard(code: str, reg_price: float, old_price: float) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"📱  حسابات عادية (${reg_price:.2f})", callback_data=f"add_stock_cat:regular:{code}")
+    builder.button(text=f"🏛️  أرقام قديمة (${old_price:.2f})", callback_data=f"add_stock_cat:old:{code}")
+    builder.button(text="❌  إلغاء", callback_data="admin:stock")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def admin_change_price_category_keyboard(code: str, reg_price: float, old_price: float) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"📱  سعر الحسابات العادية (الحالي: ${reg_price:.2f})", callback_data=f"chprice_cat:regular:{code}")
+    builder.button(text=f"🏛️  سعر الأرقام القديمة (الحالي: ${old_price:.2f})", callback_data=f"chprice_cat:old:{code}")
+    builder.button(text="❌  إلغاء", callback_data="admin:stock")
+    builder.adjust(1)
+    return builder.as_markup()
+
 
 
 def admin_links_keyboard(sell_enabled: bool = True, info_enabled: bool = True) -> InlineKeyboardMarkup:

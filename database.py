@@ -107,6 +107,12 @@ async def init_db():
             )
         except Exception:
             pass
+        try:
+            await db.execute(
+                "ALTER TABLE accounts_inventory ADD COLUMN IF NOT EXISTS account_category TEXT DEFAULT 'regular'"
+            )
+        except Exception:
+            pass
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS country_prices (
@@ -114,12 +120,19 @@ async def init_db():
                 country_name    TEXT          NOT NULL,
                 flag_emoji      TEXT          DEFAULT '🌍',
                 price           NUMERIC(12,4) NOT NULL,
-                points_price    INTEGER       DEFAULT 0
+                points_price    INTEGER       DEFAULT 0,
+                old_price       NUMERIC(12,4) DEFAULT 0.0
             )
         """)
         try:
             await db.execute(
                 "ALTER TABLE country_prices ADD COLUMN IF NOT EXISTS points_price INTEGER DEFAULT 0"
+            )
+        except Exception:
+            pass
+        try:
+            await db.execute(
+                "ALTER TABLE country_prices ADD COLUMN IF NOT EXISTS old_price NUMERIC(12,4) DEFAULT 0.0"
             )
         except Exception:
             pass
@@ -954,12 +967,13 @@ async def delete_pending_leave(user_id: int):
 
 # ─── Countries / Inventory ────────────────────────────────────────────────────
 
-async def get_countries_with_stock() -> List[Dict[str, Any]]:
+async def get_countries_with_stock(category: str = "regular") -> List[Dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as db:
         rows = await db.fetch(
             """
-            SELECT cp.country_code, cp.country_name, cp.flag_emoji, cp.price,
+            SELECT cp.country_code, cp.country_name, cp.flag_emoji,
+                   CASE WHEN $1 = 'old' THEN COALESCE(NULLIF(cp.old_price, 0), cp.price) ELSE cp.price END AS price,
                    cp.flash_sale_discount, cp.flash_sale_until,
                    COUNT(ai.id) AS stock_count
             FROM country_prices cp
@@ -967,11 +981,13 @@ async def get_countries_with_stock() -> List[Dict[str, Any]]:
                 ON ai.country_code = cp.country_code
                 AND ai.status = 'available'
                 AND ai.store_type = 'dollar'
-            GROUP BY cp.country_code, cp.country_name, cp.flag_emoji, cp.price,
+                AND COALESCE(ai.account_category, 'regular') = $1
+            GROUP BY cp.country_code, cp.country_name, cp.flag_emoji, cp.price, cp.old_price,
                      cp.flash_sale_discount, cp.flash_sale_until
             HAVING COUNT(ai.id) > 0
             ORDER BY cp.country_name
-            """
+            """,
+            category,
         )
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         results = []
@@ -1015,12 +1031,14 @@ async def get_all_countries() -> List[Dict[str, Any]]:
     async with pool.acquire() as db:
         rows = await db.fetch(
             """
-            SELECT cp.country_code, cp.country_name, cp.flag_emoji, cp.price, cp.points_price,
-                   COUNT(ai.id) AS stock_count
+            SELECT cp.country_code, cp.country_name, cp.flag_emoji, cp.price,
+                   COALESCE(cp.old_price, 0.0) AS old_price, cp.points_price,
+                   COUNT(CASE WHEN COALESCE(ai.account_category, 'regular') = 'regular' AND ai.status = 'available' THEN 1 END) AS stock_count,
+                   COUNT(CASE WHEN COALESCE(ai.account_category, 'regular') = 'old' AND ai.status = 'available' THEN 1 END) AS old_stock_count
             FROM country_prices cp
             LEFT JOIN accounts_inventory ai
-                ON ai.country_code = cp.country_code AND ai.status = 'available'
-            GROUP BY cp.country_code, cp.country_name, cp.flag_emoji, cp.price, cp.points_price
+                ON ai.country_code = cp.country_code
+            GROUP BY cp.country_code, cp.country_name, cp.flag_emoji, cp.price, cp.old_price, cp.points_price
             ORDER BY cp.country_name
             """
         )
@@ -1042,20 +1060,22 @@ async def add_country(
     flag_emoji: str,
     price: float,
     points_price: int = 0,
+    old_price: float = 0.0,
 ):
     pool = await get_pool()
     async with pool.acquire() as db:
         await db.execute(
             """
-            INSERT INTO country_prices (country_code, country_name, flag_emoji, price, points_price)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO country_prices (country_code, country_name, flag_emoji, price, points_price, old_price)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (country_code) DO UPDATE
                 SET country_name  = EXCLUDED.country_name,
                     flag_emoji    = EXCLUDED.flag_emoji,
                     price         = EXCLUDED.price,
-                    points_price  = EXCLUDED.points_price
+                    points_price  = EXCLUDED.points_price,
+                    old_price     = EXCLUDED.old_price
             """,
-            country_code, country_name, flag_emoji, price, points_price,
+            country_code, country_name, flag_emoji, price, points_price, old_price,
         )
 
 
@@ -1065,6 +1085,15 @@ async def update_country_price(country_code: str, price: float):
         await db.execute(
             "UPDATE country_prices SET price = $1 WHERE country_code = $2",
             price, country_code,
+        )
+
+
+async def update_country_old_price(country_code: str, old_price: float):
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute(
+            "UPDATE country_prices SET old_price = $1 WHERE country_code = $2",
+            old_price, country_code,
         )
 
 
@@ -1084,29 +1113,29 @@ async def add_account_to_stock(
     price: float,
     store_type: str = "dollar",
     status: str = "available",
+    account_category: str = "regular",
 ) -> int:
     """
     يُضيف حساباً إلى المخزون.
 
     status: 'available' (جاهز للبيع) | 'maintenance' (في انتظار التحقق).
-    عند الإضافة عبر لوحة الأدمن، يجب تمرير status='maintenance' ثم تفعيله
-    بعد التحقق من الجلسة — راجع _validate_and_activate_stock في admin.py.
+    account_category: 'regular' (حساب عادي) | 'old' (رقم قديم).
     """
     pool = await get_pool()
     async with pool.acquire() as db:
         row = await db.fetchrow(
             """
             INSERT INTO accounts_inventory
-                (country_code, country_name, account_data, price, store_type, status)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (country_code, country_name, account_data, price, store_type, status, account_category)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id
             """,
-            country_code, country_name, account_data, price, store_type, status,
+            country_code, country_name, account_data, price, store_type, status, account_category,
         )
         return row["id"]
 
 
-async def purchase_account(user_id: int, country_code: str) -> Optional[Dict[str, Any]]:
+async def purchase_account(user_id: int, country_code: str, category: str = "regular") -> Optional[Dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as db:
         async with db.transaction():
@@ -1119,7 +1148,14 @@ async def purchase_account(user_id: int, country_code: str) -> Optional[Dict[str
             if not user or not country:
                 return None
 
-            price = float(country["price"])
+            if category == "old":
+                raw_price = float(country.get("old_price") or country["price"])
+                if raw_price <= 0:
+                    raw_price = float(country["price"])
+            else:
+                raw_price = float(country["price"])
+
+            price = raw_price
             discount  = float(country.get("flash_sale_discount") or 0)
             flash_until = country.get("flash_sale_until")
             now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1132,9 +1168,10 @@ async def purchase_account(user_id: int, country_code: str) -> Optional[Dict[str
                 """
                 SELECT * FROM accounts_inventory
                 WHERE country_code = $1 AND status = 'available' AND store_type = 'dollar'
+                  AND COALESCE(account_category, 'regular') = $2
                 ORDER BY added_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
                 """,
-                country_code,
+                country_code, category,
             )
             if not account:
                 return None
@@ -1154,17 +1191,19 @@ async def purchase_account(user_id: int, country_code: str) -> Optional[Dict[str
                 """,
                 price, user_id,
             )
+            cat_label = "أرقام قديمة" if category == "old" else "حسابات عادية"
             await db.execute(
                 "INSERT INTO transactions (user_id, type, amount, description) VALUES ($1,'purchase',$2,$3)",
-                user_id, price, f"Purchased account — {country['country_name']}",
+                user_id, price, f"Purchased account — {country['country_name']} ({cat_label})",
             )
             return {
                 "id":           account["id"],
                 "account_data": account["account_data"],
                 "price":        price,
                 "new_balance":  float(user["balance"]) - price,
-                "country_name": country["country_name"],
+                "country_name": f"{country['country_name']} ({cat_label})",
             }
+
 
 
 async def purchase_account_points(user_id: int, country_code: str) -> Optional[Dict[str, Any]]:

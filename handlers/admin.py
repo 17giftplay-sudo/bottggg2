@@ -20,7 +20,7 @@ from database import (
     get_user, set_user_banned,
     add_balance, deduct_balance, add_points as db_add_points,
     get_setting, set_setting,
-    add_country, update_country_price, update_country_points_price,
+    add_country, update_country_price, update_country_old_price, update_country_points_price,
     add_account_to_stock, get_country, get_all_countries,
     get_available_accounts_by_country, delete_account_from_stock,
     set_flash_sale, clear_flash_sale, get_active_flash_sales,
@@ -41,6 +41,7 @@ from keyboards import (
     admin_links_keyboard, admin_stars_keyboard, admin_countries_keyboard,
     admin_back_keyboard,
     admin_flash_sale_keyboard,
+    admin_stock_category_keyboard, admin_change_price_category_keyboard,
 )
 
 router = Router()
@@ -800,10 +801,15 @@ async def admin_stock(callback: CallbackQuery):
     for c in countries:
         flag  = c.get("flag_emoji", "🌍")
         stock = c.get("stock_count", 0)
+        old_stock = c.get("old_stock_count", 0)
+        reg_p = float(c.get("price") or 0.0)
+        old_p = float(c.get("old_price") or 0.0)
         lines.append(
-            f"{flag} <b>{c['country_name']}</b> — ${float(c['price']):.2f} — مخزون: {stock}"
+            f"{flag} <b>{c['country_name']}</b> ({c['country_code']}):\n"
+            f"   • عادي: <b>{stock}</b> حساب (${reg_p:.2f})\n"
+            f"   • قديم: <b>{old_stock}</b> حساب (${old_p:.2f})"
         )
-    text = "🗄️ <b>إدارة المخزون</b>\n\n" + ("\n".join(lines) if lines else "لا توجد دول مضافة.")
+    text = "🗄️ <b>إدارة المخزون</b>\n\n" + ("\n\n".join(lines) if lines else "لا توجد دول مضافة.")
     await callback.message.edit_text(text, reply_markup=admin_stock_keyboard(), parse_mode="HTML")
     await callback.answer()
 
@@ -844,11 +850,41 @@ async def admin_add_stock_country_cb(callback: CallbackQuery, state: FSMContext)
     if not country:
         await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
         return
+
+    reg_p = float(country.get("price") or 0.0)
+    old_p = float(country.get("old_price") or 0.0)
+    flag  = country.get("flag_emoji", "")
+    await callback.message.edit_text(
+        f"📦 <b>إضافة مخزون — {flag} {country['country_name']} ({code})</b>\n\n"
+        f"اختر الفئة التي تريد إضافة الحسابات إليها:",
+        reply_markup=admin_stock_category_keyboard(code, reg_p, old_p),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("add_stock_cat:"))
+async def admin_add_stock_cat_cb(callback: CallbackQuery, state: FSMContext):
+    if not await _is_admin_or_has_perm(callback.from_user.id, "stock"):
+        await callback.answer("⛔", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    category = parts[1]
+    code = parts[2].upper()
+    country = await get_country(code)
+    if not country:
+        await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
+        return
+
+    price = float(country.get("old_price") or country["price"]) if category == "old" else float(country["price"])
+    cat_label = "🏛️ أرقام قديمة" if category == "old" else "📱 حسابات عادية"
+
     await state.update_data(
         stock_country=code,
         stock_country_name=country["country_name"],
-        stock_price=float(country["price"]),
+        stock_price=price,
         stock_type="dollar",
+        stock_category=category,
     )
     await state.set_state(AdminState.waiting_for_stock_data)
 
@@ -857,29 +893,14 @@ async def admin_add_stock_country_cb(callback: CallbackQuery, state: FSMContext)
     builder.button(text="❌ إلغاء", callback_data="admin:stock")
 
     from config import DEFAULT_API_ID, DEFAULT_API_HASH
-    if DEFAULT_API_ID and DEFAULT_API_HASH:
-        format_hint = (
-            f"📦 <b>إضافة مخزون — {flag} {country['country_name']}</b>\n\n"
-            "📋 أرسل بيانات الحساب — يُقبل شكلان:\n\n"
-            "1️⃣ <b>الصيغة المختصرة</b> (API موحّد مضبوط):\n"
-            "<code>رقم_الهاتف::session_string</code>\n\n"
-            "2️⃣ <b>الصيغة الكاملة</b>:\n"
-            "<code>رقم_الهاتف::api_id::api_hash::session_string</code>\n\n"
-            "<b>أو ارفع ملف:</b>\n"
-            "• <b>.zip</b> — Telethon Session Zip\n"
-            "• <b>.txt</b> — سطر واحد لكل حساب (Pyrogram)"
-        )
-    else:
-        format_hint = (
-            f"📦 <b>إضافة مخزون — {flag} {country['country_name']}</b>\n\n"
-            "📋 أرسل بيانات الحساب بهذه الصيغة:\n"
-            "<code>رقم_الهاتف::api_id::api_hash::session_string</code>\n\n"
-            "💡 <i>لتفعيل الصيغة المختصرة (بدون api_id/api_hash في كل سطر)،\n"
-            "أضف DEFAULT_API_ID و DEFAULT_API_HASH في متغيرات Railway.</i>\n\n"
-            "<b>أو ارفع ملف:</b>\n"
-            "• <b>.zip</b> — Telethon Session Zip\n"
-            "• <b>.txt</b> — سطر واحد لكل حساب (Pyrogram)"
-        )
+    format_hint = (
+        f"📦 <b>إضافة مخزون — {flag} {country['country_name']} ({cat_label})</b>\n"
+        f"💵 السعر المحدد: <b>${price:.2f}</b>\n\n"
+        "📋 أرسل بيانات الحساب — يُقبل:\n"
+        "• نص مباشر بصيغة <code>رقم::session_string</code> أو الصيغة الكاملة\n"
+        "• ملف <b>.zip</b> — Telethon Session Zip\n"
+        "• ملف <b>.txt</b> — سطر لكل حساب (Pyrogram)"
+    )
 
     await callback.message.edit_text(
         format_hint,
@@ -887,6 +908,7 @@ async def admin_add_stock_country_cb(callback: CallbackQuery, state: FSMContext)
         parse_mode="HTML",
     )
     await callback.answer()
+
 
 
 _VALIDATE_SEM = asyncio.Semaphore(5)   # لا أكثر من 5 اتصالات تحقق متزامنة
@@ -1391,6 +1413,7 @@ async def _process_stock_insertion_and_validation(
     country_name  = data.get("stock_country_name", "")
     price         = data.get("stock_price", 0.0)
     store_type    = data.get("stock_type", "dollar")
+    stock_category = data.get("stock_category", "regular")
     parsed_lines  = data.get("stock_parsed_ok", [])
     total_lines   = data.get("stock_total_lines", len(parsed_lines))
     syntax_failed = data.get("stock_syntax_failed", 0)
@@ -1424,6 +1447,7 @@ async def _process_stock_insertion_and_validation(
                 price=price,
                 store_type=store_type,
                 status="maintenance",
+                account_category=stock_category,
             )
             inserted.append((acc_id, line_to_save, phone))
         except Exception as e:
@@ -1620,7 +1644,7 @@ async def admin_new_country_flag(message: Message, state: FSMContext):
         return
     await state.update_data(new_country_flag=message.text.strip())
     await state.set_state(AdminState.waiting_for_new_country_price)
-    await message.answer("أرسل سعر الحساب بالدولار (مثال: 2.50):")
+    await message.answer("أرسل سعر الحساب العادي بالدولار (مثال: 0.15):")
 
 
 @router.message(AdminState.waiting_for_new_country_price)
@@ -1632,23 +1656,47 @@ async def admin_new_country_price(message: Message, state: FSMContext):
         if price <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("❌ أدخل سعراً صحيحاً.")
+        await message.answer("❌ أدخل سعراً صحيحاً (مثال: 0.15).")
+        return
+
+    await state.update_data(new_country_reg_price=price)
+    await state.set_state(AdminState.waiting_for_new_country_old_price)
+    await message.answer(
+        f"✅ سعر الحساب العادي: <b>${price:.2f}</b>\n\n"
+        "🏛️ الآن أرسل <b>سعر الرقم القديم</b> بالدولار (أو أرسل 0 إذا لم ترغب بتحديده حالياً):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_for_new_country_old_price)
+async def admin_new_country_old_price_received(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        old_price = float(message.text.strip())
+        if old_price < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ أدخل سعراً صحيحاً (مثال: 0.50 أو 0).")
         return
 
     data = await state.get_data()
     await state.clear()
 
-    code  = data["new_country_code"]
-    name  = data["new_country_name"]
-    flag  = data.get("new_country_flag", "🌍")
+    code      = data["new_country_code"]
+    name      = data["new_country_name"]
+    flag      = data.get("new_country_flag", "🌍")
+    reg_price = float(data.get("new_country_reg_price", 0.0))
 
-    await add_country(code, name, flag, price)
+    await add_country(code, name, flag, reg_price, points_price=0, old_price=old_price)
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 إدارة المخزون", callback_data="admin:stock")
     await message.answer(
-        f"✅ تمت إضافة الدولة:\n\n"
-        f"{flag} <b>{name}</b> ({code}) — ${price:.2f}",
+        f"✅ <b>تمت إضافة الدولة بنجاح!</b>\n\n"
+        f"{flag} <b>{name}</b> ({code})\n"
+        f"• 📱 سعر الحساب العادي: <b>${reg_price:.2f}</b>\n"
+        f"• 🏛️ سعر الرقم القديم: <b>${old_price:.2f}</b>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -1679,15 +1727,49 @@ async def admin_change_price_country(callback: CallbackQuery, state: FSMContext)
         await callback.answer("⛔", show_alert=True)
         return
     code = callback.data.split(":", 1)[1].upper()
-    await state.update_data(price_country=code)
-    await state.set_state(AdminState.waiting_for_new_price)
+    country = await get_country(code)
+    if not country:
+        await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
+        return
+    reg_price = float(country.get("price") or 0.0)
+    old_price = float(country.get("old_price") or 0.0)
+    flag = country.get("flag_emoji", "")
+    await callback.message.edit_text(
+        f"💲 <b>تغيير سعر دولة — {flag} {country['country_name']} ({code})</b>\n\n"
+        f"اختر الفئة التي تريد تعديل سعرها:",
+        reply_markup=admin_change_price_category_keyboard(code, reg_price, old_price),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("chprice_cat:"))
+async def admin_change_price_category_chosen(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    category = parts[1]
+    code = parts[2].upper()
+    country = await get_country(code)
+    if not country:
+        await callback.answer("❌ الدولة غير موجودة.", show_alert=True)
+        return
+
+    await state.update_data(price_country=code, price_category=category)
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ إلغاء", callback_data="admin:stock")
-    await callback.message.edit_text(
-        f"💲 الدولة: <b>{code}</b>\n\nأرسل السعر الجديد بالدولار:",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
+
+    if category == "old":
+        await state.set_state(AdminState.waiting_for_new_old_price)
+        current = float(country.get("old_price") or 0.0)
+        lbl = f"🏛️ <b>تعديل سعر الأرقام القديمة</b> لـ <b>{code}</b>\nالسعر الحالي: ${current:.2f}\n\nأرسل السعر الجديد بالدولار:"
+    else:
+        await state.set_state(AdminState.waiting_for_new_price)
+        current = float(country.get("price") or 0.0)
+        lbl = f"📱 <b>تعديل سعر الحسابات العادية</b> لـ <b>{code}</b>\nالسعر الحالي: ${current:.2f}\n\nأرسل السعر الجديد بالدولار:"
+
+    await callback.message.edit_text(lbl, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 
 
@@ -1711,10 +1793,37 @@ async def admin_new_price_received(message: Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 إدارة المخزون", callback_data="admin:stock")
     await message.answer(
-        f"✅ تم تحديث سعر <b>{code}</b> إلى <b>${price:.2f}</b>",
+        f"✅ تم تحديث سعر الحسابات العادية لـ <b>{code}</b> إلى <b>${price:.2f}</b>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
+
+
+@router.message(AdminState.waiting_for_new_old_price)
+async def admin_new_old_price_received(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        price = float(message.text.strip())
+        if price < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ أدخل سعراً صحيحاً (0 أو أكثر).")
+        return
+
+    data = await state.get_data()
+    code = data["price_country"]
+    await state.clear()
+    await update_country_old_price(code, price)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 إدارة المخزون", callback_data="admin:stock")
+    await message.answer(
+        f"✅ تم تحديث سعر الأرقام القديمة لـ <b>{code}</b> إلى <b>${price:.2f}</b>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+
 
 
 # ─── تغيير سعر النقاط ────────────────────────────────────────────────────────
