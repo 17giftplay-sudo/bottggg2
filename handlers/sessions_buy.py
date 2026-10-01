@@ -376,11 +376,9 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
 
     from utils.session_delivery import prepare_session_for_delivery
 
-    # جلب الباسوورد المحدد للمخزون (إن وُجد)
-    new_password = (await get_setting("stock_2fa_password") or "").strip()
-
+    # إزالة الباسوورد تماماً (2FA) عند تسليم الجلسات للمشتري
     tasks = [
-        prepare_session_for_delivery(acc["account_data"], new_password=new_password)
+        prepare_session_for_delivery(acc["account_data"], new_password="")
         for acc in result["accounts"]
     ]
     deliveries = await asyncio.gather(*tasks, return_exceptions=True)
@@ -427,6 +425,8 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
                                 "username":        "",
                                 "full_name":       "",
                                 "password_changed": False,
+                                "password_removed": False,
+                                "final_password":   parsed.get("two_factor", ""),
                             }
                         else:
                             continue
@@ -441,7 +441,6 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
             ok_infos.append(d)
 
         # README.txt — هيدر + معلومات كل حساب
-        pw_label = f"كلمة المرور الجديدة: {new_password}" if new_password else "تمت إزالة الباسوورد ✅"
         readme_lines = [
             f"📦 الحزمة: {flag} {cname} | الصيغة: file | العدد: {len(ok_infos)}",
             "━━━━━━━━━━━━━━━━━━━━",
@@ -450,6 +449,13 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
         for i, d in enumerate(ok_infos, 1):
             uname = d.get("username", "") or ""
             name  = d.get("full_name", "") or ""
+            if d.get("password_removed") or not d.get("has_2fa", False):
+                pw_label = "تمت إزالة الباسوورد بالكامل (بدون باسوورد) ✅"
+            elif d.get("final_password"):
+                pw_label = f"باسوورد 2FA: {d['final_password']}"
+            else:
+                pw_label = "باسوورد 2FA: لا يوجد"
+
             readme_lines += [
                 f"[{i}]",
                 f"📱 الرقم: {d['phone']}",
@@ -473,17 +479,14 @@ async def sessions_execute(callback: CallbackQuery, state: FSMContext, bot: Bot)
     zip_file = BufferedInputFile(zip_buf.read(), filename=zip_name)
 
     # ── رسالة النجاح ─────────────────────────────────────────────────────────
-    ok_count    = len(ok_infos)
-    pw_line_ar  = (
-        f"🔑  كلمة المرور الجديدة: <code>{new_password}</code>"
-        if new_password else
-        "🔑  تمت إزالة الباسوورد ✅"
-    )
-    pw_line_en  = (
-        f"🔑  New password: <code>{new_password}</code>"
-        if new_password else
-        "🔑  Password removed ✅"
-    )
+    ok_count  = len(ok_infos)
+    all_clean = all(d.get("password_removed", False) or not d.get("has_2fa", False) for d in ok_infos)
+    if all_clean:
+        pw_line_ar = "🔑  <b>حالة الأمان (2FA):</b> تمت إزالة الباسوورد بالكامل من جميع الجلسات ✅"
+        pw_line_en = "🔑  <b>2FA Status:</b> Password completely removed from all sessions ✅"
+    else:
+        pw_line_ar = "🔑  <b>حالة الأمان (2FA):</b> تم توضيح باسوورد كل جلسة بالتفصيل داخل ملف README.txt"
+        pw_line_en = "🔑  <b>2FA Status:</b> Password details included inside README.txt"
     warn_ar = f"\n\n⚠️ <b>{fail_count}</b> جلسة تعذّر تجهيزها." if fail_count else ""
     warn_en = f"\n\n⚠️ <b>{fail_count}</b> session(s) failed." if fail_count else ""
 

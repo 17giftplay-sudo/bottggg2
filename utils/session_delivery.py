@@ -73,25 +73,49 @@ async def prepare_session_for_delivery(account_data: str, new_password: str = ""
     )
 
     result = {
-        "ok":              False,
-        "phone":           phone,
-        "api_id":          api_id,
-        "api_hash":        api_hash,
-        "session_string":  session_str,
-        "session_bytes":   b"",
-        "username":        "",
-        "full_name":       "",
-        "user_id":         0,
-        "new_password":    new_password,
+        "ok":               False,
+        "phone":            phone,
+        "api_id":           api_id,
+        "api_hash":         api_hash,
+        "session_string":   session_str,
+        "session_bytes":    b"",
+        "username":         "",
+        "full_name":        "",
+        "user_id":          0,
+        "new_password":     new_password,
         "password_changed": False,
-        "error":           "",
+        "password_removed": False,
+        "has_2fa":          False,
+        "final_password":   "",
+        "error":            "",
     }
 
     async with _SEMAPHORE:
         try:
-            await asyncio.wait_for(client.start(), timeout=_CONNECT_TIMEOUT)
+            try:
+                await asyncio.wait_for(client.start(), timeout=_CONNECT_TIMEOUT)
+            except (asyncio.TimeoutError, OSError, ConnectionError) as conn_err:
+                proxy_kwargs = _build_proxy_kwargs(phone)
+                if proxy_kwargs:
+                    logger.info("Proxy connection failed for %s, retrying direct connection...", phone)
+                    try:
+                        await client.stop()
+                    except Exception:
+                        pass
+                    client = Client(
+                        name=f"delivery_direct_{phone.replace('+', '')}",
+                        api_id=api_id,
+                        api_hash=api_hash,
+                        session_string=session_str,
+                        in_memory=True,
+                        no_updates=True,
+                        **{k: device[k] for k in device},
+                    )
+                    await asyncio.wait_for(client.start(), timeout=_CONNECT_TIMEOUT)
+                else:
+                    raise conn_err
 
-            # ── معلومات الحساب ────────────────────────────────────────────────
+            # ── 1. معلومات الحساب ────────────────────────────────────────────
             try:
                 me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
                 result["user_id"]   = me.id
@@ -101,6 +125,84 @@ async def prepare_session_for_delivery(account_data: str, new_password: str = ""
                 logger.warning("get_me failed for %s: %s", phone, e)
 
             result["ok"] = True
+
+            # ── 2. فحص ونزع / تغيير باسوورد 2FA ─────────────────────────────
+            try:
+                from pyrogram.raw.functions.account import GetPassword
+                from pyrogram.errors import PasswordHashInvalid
+                from database import get_setting
+
+                pwd_obj = await asyncio.wait_for(client.invoke(GetPassword()), timeout=10)
+                has_2fa = bool(getattr(pwd_obj, "has_password", False))
+                result["has_2fa"] = has_2fa
+
+                if not has_2fa:
+                    # الحساب ليس عليه باسوورد أصلاً
+                    result["password_removed"] = True
+                    result["password_changed"] = True
+                    result["final_password"]   = ""
+                    logger.info("Account %s has no 2FA password.", phone)
+                else:
+                    # الحساب محمي بباسوورد 2FA — تجميع الباسووردات المحتملة لنزعه
+                    candidates = []
+                    if two_factor and two_factor.strip():
+                        candidates.append(two_factor.strip())
+
+                    stock_pw = (await get_setting("stock_2fa_password") or "").strip()
+                    if stock_pw and stock_pw not in candidates:
+                        candidates.append(stock_pw)
+
+                    fb_raw = (await get_setting("stock_2fa_fallback") or "").strip()
+                    for fb in fb_raw.split(","):
+                        fb_s = fb.strip()
+                        if fb_s and fb_s not in candidates:
+                            candidates.append(fb_s)
+
+                    removed = False
+                    for cand in candidates:
+                        try:
+                            if new_password:
+                                await asyncio.wait_for(
+                                    client.change_cloud_password(current_password=cand, new_password=new_password),
+                                    timeout=_OP_TIMEOUT,
+                                )
+                                removed = True
+                                result["password_changed"] = True
+                                result["password_removed"] = False
+                                result["final_password"]   = new_password
+                                logger.info("Changed 2FA password for %s to new_password", phone)
+                                break
+                            else:
+                                await asyncio.wait_for(
+                                    client.remove_cloud_password(cand),
+                                    timeout=_OP_TIMEOUT,
+                                )
+                                removed = True
+                                result["password_changed"] = True
+                                result["password_removed"] = True
+                                result["final_password"]   = ""
+                                logger.info("Successfully removed 2FA password for %s using candidate", phone)
+                                break
+                        except PasswordHashInvalid:
+                            continue
+                        except ValueError:
+                            # "There is no cloud password to remove"
+                            removed = True
+                            result["password_changed"] = True
+                            result["password_removed"] = True
+                            result["final_password"]   = ""
+                            break
+                        except Exception as rem_err:
+                            logger.warning("Attempt to remove/change 2FA for %s with %s failed: %s", phone, cand, rem_err)
+
+                    if not removed:
+                        logger.warning("Could not remove 2FA for %s — candidates %s failed", phone, candidates)
+                        result["password_changed"] = False
+                        result["password_removed"] = False
+                        result["final_password"]   = two_factor or stock_pw or ""
+
+            except Exception as e:
+                logger.warning("2FA check/removal error for %s: %s", phone, e)
 
         except (AuthKeyUnregistered, UserDeactivated, SessionExpired,
                 AuthKeyDuplicated, AuthKeyInvalid) as e:
